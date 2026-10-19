@@ -1,12 +1,15 @@
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { supabase } from "@/lib/supabase"
 import {
   Beaker,
   ChevronRight,
   ClipboardList,
   Plus,
+  FileText,
+  Upload,
 } from "lucide-react"
-
+import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -31,41 +34,23 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-type EstadoDope = "Molido" | "Sin moler"
+type EstadoDope = "Molido" | "Sin moler" | "Extruido"
 
 type Dope = {
   id: number
-  fecha: string
-  peso: number
+  fecha: string | null
+  peso: number | null
   estado: EstadoDope
-}
+  ubicacion: string
+  recuperado: boolean
+  recuperadoDe: number | null
+  extrusionOrigen: {
+    fecha: string | null
+    geometria: string | null
+  } | null
 
-const dopesIniciales: Dope[] = [
-  {
-    id: 38,
-    fecha: "2026-10-06",
-    peso: 1200,
-    estado: "Molido",
-  },
-  {
-    id: 37,
-    fecha: "2026-10-04",
-    peso: 850,
-    estado: "Sin moler",
-  },
-  {
-    id: 36,
-    fecha: "2026-10-02",
-    peso: 1000,
-    estado: "Molido",
-  },
-  {
-    id: 35,
-    fecha: "2026-09-30",
-    peso: 500,
-    estado: "Molido",
-  },
-]
+  pdf: string | null
+}
 
 type PreparacionProps = {
   onNewDope: () => void
@@ -74,44 +59,262 @@ type PreparacionProps = {
 export function Preparacion({
   onNewDope,
 }: PreparacionProps) {
-  const [dopes, setDopes] =
-    useState<Dope[]>(dopesIniciales)
-
+  const [dopes, setDopes] = useState<Dope[]>([])
   const [dopeSeleccionado, setDopeSeleccionado] =
     useState<Dope | null>(null)
+  const [cargando, setCargando] = useState(true)
+  const [errorCarga, setErrorCarga] = useState<string | null>(null)
+  const [actualizandoId, setActualizandoId] = useState<number | null>(null)
 
-  function cambiarEstado(
+  useEffect(() => {
+    async function cargarDopes() {
+      setCargando(true)
+      setErrorCarga(null)
+
+      const [
+  { data: datosDopes, error: errorDopes },
+  { data: datosHeladera, error: errorHeladera },
+  { data: datosExtrusiones, error: errorExtrusiones },
+  { data: datosPreparaciones, error: errorPreparaciones },
+] = await Promise.all([
+  supabase
+    .from("DOPE")
+    .select(
+      'id, "FechaPreparacion", "Peso", "Estado", "Recuperado", "RecuperadoDe"'
+    )
+    .order("id", { ascending: false }),
+
+  supabase
+    .from("DOPE_Heladera")
+    .select('"DOPE"'),
+
+  supabase
+    .from("ExtrusionFibras")
+    .select('id, "Fecha", "Geometria"'),
+
+    supabase
+  .from("PreparacionDOPE")
+  .select('"DOPE", "PDF"'),
+])
+
+if (errorDopes || errorHeladera || errorExtrusiones||errorPreparaciones) {
+  console.error("Error al cargar los detalles de los DOPE:", {
+    errorDopes,
+    errorHeladera,
+    errorExtrusiones,
+  })
+
+  setErrorCarga(
+    "No se pudieron cargar los DOPE, sus ubicaciones o sus extrusiones."
+  )
+  setCargando(false)
+  return
+}
+
+const idsEnHeladera = new Set(
+  (datosHeladera ?? []).map((registro) => Number(registro.DOPE))
+)
+
+const extrusionesPorId = new Map(
+  (datosExtrusiones ?? []).map((extrusion) => [
+    Number(extrusion.id),
+    {
+      fecha: extrusion.Fecha,
+      geometria: extrusion.Geometria,
+    },
+  ])
+)
+const pdfPorDopeId = new Map<number, string | null>()
+
+for (const preparacion of datosPreparaciones ?? []) {
+  if (preparacion.DOPE != null) {
+    pdfPorDopeId.set(
+      Number(preparacion.DOPE),
+      preparacion.PDF
+    )
+  }
+}
+const registros: Dope[] = (datosDopes ?? []).map((registro) => {
+  const estadoNormalizado = String(registro.Estado ?? "")
+    .trim()
+    .toLowerCase()
+
+  const estado: EstadoDope =
+    estadoNormalizado === "extruido"
+      ? "Extruido"
+      : estadoNormalizado === "molido"
+        ? "Molido"
+        : "Sin moler"
+
+  const recuperadoDe =
+    registro.RecuperadoDe == null
+      ? null
+      : Number(registro.RecuperadoDe)
+
+  return {
+    id: Number(registro.id),
+    fecha: registro.FechaPreparacion,
+    peso: registro.Peso == null ? null : Number(registro.Peso),
+    estado,
+    ubicacion:
+      estado === "Extruido"
+        ? "-"
+        : idsEnHeladera.has(Number(registro.id))
+          ? "Dentro de heladera"
+          : "Fuera de heladera",
+    recuperado: registro.Recuperado === true || recuperadoDe !== null,
+    recuperadoDe,
+    extrusionOrigen:
+      recuperadoDe === null
+        ? null
+        : extrusionesPorId.get(recuperadoDe) ?? null,
+  pdf: pdfPorDopeId.get(Number(registro.id)) ?? null,
+      }
+})
+
+setDopes(registros)
+setCargando(false)
+    }
+
+    void cargarDopes()
+  }, [])
+
+  async function cambiarEstado(
     dopeId: number,
     nuevoEstado: EstadoDope
   ) {
+    const estadoAnterior = dopes.find((dope) => dope.id === dopeId)?.estado
+    if (!estadoAnterior || actualizandoId !== null) return
+
+    setActualizandoId(dopeId)
+    setErrorCarga(null)
+
+    const { error } = await supabase
+      .from("DOPE")
+      .update({ Estado: nuevoEstado.toLowerCase() })
+      .eq("id", dopeId)
+
+    if (error) {
+      console.error("Error al actualizar el estado del DOPE:", error)
+      setErrorCarga(
+        "No se pudo guardar el cambio de estado. El valor anterior se mantiene."
+      )
+      setActualizandoId(null)
+      return
+    }
+
     setDopes((actuales) =>
       actuales.map((dope) =>
-        dope.id === dopeId
-          ? {
-              ...dope,
-              estado: nuevoEstado,
-            }
-          : dope
+        dope.id === dopeId ? { ...dope, estado: nuevoEstado } : dope
       )
     )
 
-    // Si el diálogo de detalles está abierto,
-    // también actualizamos el DOPE mostrado allí.
     setDopeSeleccionado((actual) =>
-      actual?.id === dopeId
-        ? {
-            ...actual,
-            estado: nuevoEstado,
-          }
-        : actual
+      actual?.id === dopeId ? { ...actual, estado: nuevoEstado } : actual
     )
+
+    setActualizandoId(null)
   }
 
   function abrirDetalles(dope: Dope) {
     setDopeSeleccionado(dope)
   }
+const [subiendoPdf, setSubiendoPdf] = useState(false)
+  
+async function abrirPdf(dope: Dope) {
+  if (!dope.pdf) return
 
-  return (
+  const { data, error } = await supabase.storage
+    .from("preparacion-pdf")
+    .createSignedUrl(dope.pdf, 60)
+
+  if (error || !data?.signedUrl) {
+    alert(`No se pudo abrir el PDF: ${error?.message ?? "Error desconocido"}`)
+    return
+  }
+
+  window.open(data.signedUrl, "_blank", "noopener,noreferrer")
+}
+
+async function guardarPdf(dope: Dope, archivo: File) {
+  if (archivo.type !== "application/pdf" &&
+      !archivo.name.toLowerCase().endsWith(".pdf")) {
+    alert("Seleccioná un archivo PDF.")
+    return
+  }
+
+  setSubiendoPdf(true)
+
+  let rutaPdf: string | null = null
+
+  try {
+    const nombreSeguro = archivo.name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "_")
+
+    rutaPdf = `dope-${dope.id}/${Date.now()}-${nombreSeguro}`
+
+    const { error: errorSubida } = await supabase.storage
+      .from("preparacion-pdf")
+      .upload(rutaPdf, archivo, {
+        contentType: "application/pdf",
+        upsert: false,
+      })
+
+    if (errorSubida) throw errorSubida
+
+    const { error: errorActualizacion } = await supabase
+      .from("PreparacionDOPE")
+      .update({ PDF: rutaPdf })
+      .eq("DOPE", dope.id)
+
+    if (errorActualizacion) throw errorActualizacion
+
+    // Actualizar la pantalla sin tener que recargarla
+    setDopes((actuales) =>
+      actuales.map((item) =>
+        item.id === dope.id ? { ...item, pdf: rutaPdf } : item
+      )
+    )
+
+    setDopeSeleccionado((actual) =>
+      actual?.id === dope.id
+        ? { ...actual, pdf: rutaPdf }
+        : actual
+    )
+
+    // Eliminar la versión anterior solo después de guardar la nueva
+    if (dope.pdf && dope.pdf !== rutaPdf) {
+      const { error: errorEliminar } = await supabase.storage
+        .from("preparacion-pdf")
+        .remove([dope.pdf])
+
+      if (errorEliminar) {
+        console.error("No se pudo eliminar el PDF anterior:", errorEliminar)
+      }
+    }
+
+    alert("PDF guardado correctamente.")
+  } catch (error) {
+    console.error("Error al guardar el PDF:", error)
+
+    if (rutaPdf) {
+      await supabase.storage
+        .from("preparacion-pdf")
+        .remove([rutaPdf])
+    }
+
+    alert(
+      `No se pudo guardar el PDF: ${
+        error instanceof Error ? error.message : "Error desconocido"
+      }`
+    )
+  } finally {
+    setSubiendoPdf(false)
+  }
+}
+return (
     <>
       <div className="space-y-8">
         {/* =====================================================
@@ -198,7 +401,22 @@ export function Preparacion({
             </p>
           </div>
 
-          {dopes.length === 0 ? (
+          {errorCarga && (
+            <div
+              role="alert"
+              className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive"
+            >
+              {errorCarga}
+            </div>
+          )}
+
+          {cargando ? (
+            <Card>
+              <CardContent className="flex min-h-32 items-center justify-center text-sm text-muted-foreground">
+                Cargando DOPE...
+              </CardContent>
+            </Card>
+          ) : dopes.length === 0 ? (
             <Card>
               <CardContent className="flex min-h-48 flex-col items-center justify-center text-center">
                 <Beaker className="mb-4 h-10 w-10 text-muted-foreground" />
@@ -219,6 +437,9 @@ export function Preparacion({
                   key={dope.id}
                   dope={dope}
                   onEstadoChange={cambiarEstado}
+                  estadoDeshabilitado={
+                    actualizandoId === dope.id || actualizandoId !== null
+                  }
                   onViewDetails={() =>
                     abrirDetalles(dope)
                   }
@@ -289,22 +510,99 @@ export function Preparacion({
                         {dopeSeleccionado.estado}
                       </p>
                     </div>
+
+                    {/* PDF de preparación */}
+<div className="space-y-3 border-t pt-4">
+  <h3 className="text-sm font-semibold">
+    PDF de preparación
+  </h3>
+
+  {dopeSeleccionado.pdf ? (
+    <Button
+      type="button"
+      variant="outline"
+      className="w-full justify-start"
+      onClick={() => void abrirPdf(dopeSeleccionado)}
+    >
+      <FileText className="mr-2 h-4 w-4" />
+      Ver PDF adjunto
+    </Button>
+  ) : (
+    <p className="text-sm text-muted-foreground">
+      Todavía no hay un PDF adjunto.
+    </p>
+  )}
+
+  <div className="space-y-2">
+    <Label htmlFor="pdf-detalles">
+      {dopeSeleccionado.pdf ? "Reemplazar PDF" : "Adjuntar PDF"}
+    </Label>
+
+    <Input
+      id="pdf-detalles"
+      type="file"
+      accept="application/pdf,.pdf"
+      disabled={subiendoPdf}
+      onChange={(event) => {
+        const archivo = event.target.files?.[0]
+
+        if (archivo && dopeSeleccionado) {
+          void guardarPdf(dopeSeleccionado, archivo)
+        }
+
+        event.target.value = ""
+      }}
+    />
+
+    {subiendoPdf && (
+      <p className="text-sm text-muted-foreground">
+        Subiendo PDF...
+      </p>
+    )}
+  </div>
+</div>
+                    <Detalle
+
+                    
+  label="Ubicación"
+  value={dopeSeleccionado.ubicacion}
+/>
+
+{dopeSeleccionado.recuperado && (
+  <>
+    <Detalle
+      label="DOPE recuperado"
+      value="Sí"
+    />
+
+    <div className="col-span-2">
+      <Detalle
+        label="Extrusión de origen"
+        value={
+          dopeSeleccionado.recuperadoDe === null
+            ? "Sin registrar"
+            : `Extrusión #${dopeSeleccionado.recuperadoDe}`
+        }
+      />
+
+      {dopeSeleccionado.extrusionOrigen && (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {dopeSeleccionado.extrusionOrigen.fecha
+            ? `Fecha: ${formatearFecha(
+                dopeSeleccionado.extrusionOrigen.fecha
+              )}`
+            : "Fecha sin registrar"}
+          {" · "}
+          {dopeSeleccionado.extrusionOrigen.geometria ??
+            "Geometría sin registrar"}
+        </p>
+      )}
+    </div>
+  </>
+)}
                   </div>
                 </div>
 
-                {/* Próximamente */}
-                <div className="rounded-lg border border-dashed p-4">
-                  <p className="text-sm font-medium">
-                    Más información
-                  </p>
-
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Cuando conectemos Supabase, acá podremos
-                    mostrar la composición del DOPE, su
-                    ubicación en la heladera, las extrusiones
-                    realizadas y otros datos asociados.
-                  </p>
-                </div>
               </div>
             </>
           )}
@@ -321,6 +619,7 @@ export function Preparacion({
 function DopeCard({
   dope,
   onEstadoChange,
+  estadoDeshabilitado,
   onViewDetails,
 }: {
   dope: Dope
@@ -328,6 +627,7 @@ function DopeCard({
     dopeId: number,
     estado: EstadoDope
   ) => void
+  estadoDeshabilitado: boolean
   onViewDetails: () => void
 }) {
   return (
@@ -372,31 +672,27 @@ function DopeCard({
           </Label>
 
           <Select
-            value={dope.estado}
-            onValueChange={(value) =>
-              onEstadoChange(
-                dope.id,
-                value as EstadoDope
-              )
-            }
-          >
-            <SelectTrigger
-              id={`estado-${dope.id}`}
-              className="mt-1"
-            >
-              <SelectValue />
-            </SelectTrigger>
+  value={dope.estado}
+  disabled={estadoDeshabilitado || dope.estado === "Extruido"}
+  onValueChange={(value) =>
+    onEstadoChange(dope.id, value as EstadoDope)
+  }
+>
+  <SelectTrigger
+    id={`estado-${dope.id}`}
+    className="mt-1"
+  >
+    <SelectValue />
+  </SelectTrigger>
 
-            <SelectContent>
-              <SelectItem value="Molido">
-                Molido
-              </SelectItem>
-
-              <SelectItem value="Sin moler">
-                Sin moler
-              </SelectItem>
-            </SelectContent>
-          </Select>
+  <SelectContent>
+    <SelectItem value="Molido">Molido</SelectItem>
+    <SelectItem value="Sin moler">Sin moler</SelectItem>
+    <SelectItem value="Extruido" disabled>
+      Extruido
+    </SelectItem>
+  </SelectContent>
+</Select>
         </div>
 
         {/* Detalles */}
@@ -440,16 +736,14 @@ function Detalle({
    UTILIDADES
    ========================================================= */
 
-function formatPeso(peso: number) {
-  if (peso >= 1000) {
-    return `${(peso / 1000).toFixed(2)} kg`
-  }
-
+function formatPeso(peso: number | null) {
+  if (peso === null || !Number.isFinite(peso)) return "Sin registrar"
+  if (peso >= 1000) return `${(peso / 1000).toFixed(2)} kg`
   return `${peso} g`
 }
 
-function formatearFecha(fecha: string) {
+function formatearFecha(fecha: string | null) {
+  if (!fecha) return "Sin registrar"
   const [año, mes, dia] = fecha.split("-")
-
   return `${dia}/${mes}/${año}`
 }

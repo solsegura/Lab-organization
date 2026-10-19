@@ -354,7 +354,9 @@ if (!Number.isFinite(cantidad) || cantidad <= 0) {
 
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   }
-
+const dopeSeleccionado = dopes.find(
+  (dope) => String(dope.id) === dopeId
+)
   return (
     <div className="mx-auto w-full max-w-6xl space-y-8 p-4 md:p-8">
       <div className="flex items-center gap-3">
@@ -470,19 +472,44 @@ if (!Number.isFinite(cantidad) || cantidad <= 0) {
               </select>
             </label>
 
-            <label className="space-y-2 text-sm font-medium">
-              Cantidad de DOPE utilizada (g)
-              <input
-                type="number"
-                min="0.001"
-                step="any"
-                value={cantidadDope}
-                onChange={(e) => setCantidadDope(e.target.value)}
-                required
-                placeholder="Ej. 25"
-                className="w-full rounded-xl border bg-background px-3 py-2.5 font-normal"
-              />
-            </label>
+            
+<label className="space-y-2 text-sm font-medium">
+  <div className="flex items-center justify-between gap-3">
+    <span>Cantidad de DOPE utilizada (g)</span>
+
+    <button
+      type="button"
+      disabled={
+        dopeSeleccionado?.MasaRestante == null ||
+        Number(dopeSeleccionado.MasaRestante) <= 0
+      }
+      onClick={() => {
+        if (dopeSeleccionado?.MasaRestante != null) {
+          setCantidadDope(String(dopeSeleccionado.MasaRestante))
+        }
+      }}
+      className="text-xs font-medium text-primary underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      Usar todo (
+      {dopeSeleccionado?.MasaRestante != null
+        ? `${formatNumero(dopeSeleccionado.MasaRestante)} g`
+        : "—"}
+      )
+    </button>
+  </div>
+
+  <input
+    type="number"
+    min="0.001"
+    step="any"
+    value={cantidadDope}
+    onChange={(e) => setCantidadDope(e.target.value)}
+    required
+    placeholder="Ej. 25"
+    className="w-full rounded-xl border bg-background px-3 py-2.5 font-normal"
+  />
+</label>
+```
           </div>
 
           <div className="rounded-xl border p-4">
@@ -562,10 +589,7 @@ if (!Number.isFinite(cantidad) || cantidad <= 0) {
             </span>
           </label>
 
-          <p className="text-xs text-muted-foreground">
-            Las cantidades de celulosa y NMMO se registran en Preparación de
-            DOPE y no se solicitan en esta pantalla.
-          </p>
+          
 
           <button
             type="submit"

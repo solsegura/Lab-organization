@@ -13,7 +13,7 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { Preparacion } from "@/components/preparacion"
-import { NuevoDope } from "@/components/nuevo-dope"
+import { NuevoDope, type DatosNuevoDope } from "./components/nuevo-dope"
 import { GuardarDope } from "@/components/guardar-dope"
 import { Extrusion as ExtrusionForm } from "@/components/extrusion"
 import { Fibras } from "@/components/fibras"
@@ -97,6 +97,9 @@ useEffect(() => {
 
   const [preparacionView, setPreparacionView] =
     useState<PreparacionView>("menu")
+
+
+const [datosNuevoDope, setDatosNuevoDope] = useState<DatosNuevoDope | null>(null)
 
   const activeItem = menuItems.find(
     (item) => item.id === activeSection
@@ -193,18 +196,24 @@ useEffect(() => {
       />
     )}
 
-    {preparacionView === "nuevo-dope" && (
-      <NuevoDope
-        onBack={() => setPreparacionView("menu")}
-        onContinue={() => setPreparacionView("guardar-dope")}
-      />
-    )}
+    
+{preparacionView === "nuevo-dope" && (
+  <NuevoDope
+    onBack={() => setPreparacionView("menu")}
+    onContinue={(datos) => {
+      setDatosNuevoDope(datos)
+      setPreparacionView("guardar-dope")
+    }}
+  />
+)}
 
-    {preparacionView === "guardar-dope" && (
-      <GuardarDope
-        onBack={() => setPreparacionView("nuevo-dope")}
-      />
-    )}
+{preparacionView === "guardar-dope" && datosNuevoDope && (
+  <GuardarDope
+    datos={datosNuevoDope}
+    onBack={() => setPreparacionView("nuevo-dope")}
+  />
+)}
+
   </>
 ) : activeSection === "extrusion" ? (
   <ExtrusionForm

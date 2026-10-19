@@ -1,11 +1,14 @@
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   CalendarDays,
   ClipboardList,
+  FileText,
   Plus,
   Wrench,
 } from "lucide-react"
+
+import { supabase } from "@/lib/supabase"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -26,111 +29,174 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-
-type TipoMantenimiento =
-  | "Limpieza"
-  | "Cambio de pieza"
-  | "Reparación"
-  | "Inspección"
-  | "Otro"
 
 type Mantenimiento = {
   id: number
   fecha: string
-  tipo: TipoMantenimiento
   descripcion: string
-  observaciones: string
+  pdf: string | null
+  pdfUrl?: string | null
 }
 
-const mantenimientosIniciales: Mantenimiento[] = [
-  {
-    id: 1,
-    fecha: "2026-10-06",
-    tipo: "Limpieza",
-    descripcion: "Limpieza general de la extrusora",
-    observaciones:
-      "Se realizó limpieza de las partes en contacto con el dope.",
-  },
-  {
-    id: 2,
-    fecha: "2026-09-28",
-    tipo: "Cambio de pieza",
-    descripcion: "Cambio de filtro",
-    observaciones:
-      "Se reemplazó el filtro utilizado durante la extrusión.",
-  },
-]
+const BUCKET_PDF = "mantenimiento-pdf"
 
 export function Mantenimiento() {
-  const [mantenimientos, setMantenimientos] =
-    useState<Mantenimiento[]>(
-      mantenimientosIniciales
+  const [mantenimientos, setMantenimientos] = useState<
+    Mantenimiento[]
+  >([])
+
+  const [dialogAbierto, setDialogAbierto] = useState(false)
+  const [fecha, setFecha] = useState(obtenerFechaActual())
+  const [descripcion, setDescripcion] = useState("")
+  const [archivoPDF, setArchivoPDF] = useState<File | null>(null)
+
+  const [cargando, setCargando] = useState(true)
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    void cargarMantenimientos()
+  }, [])
+
+  async function cargarMantenimientos() {
+    setCargando(true)
+    setError(null)
+
+    const { data, error: errorConsulta } = await supabase
+      .from("Mantenimiento_Maquina")
+      .select('id, "Fecha", "Descripcion", "PDF"')
+      .order("Fecha", { ascending: false })
+      .order("id", { ascending: false })
+
+    if (errorConsulta) {
+      setError(
+        `No se pudieron cargar los mantenimientos: ${errorConsulta.message}`
+      )
+      setCargando(false)
+      return
+    }
+
+    const registros: Mantenimiento[] = await Promise.all(
+      (data ?? []).map(async (registro) => {
+        let pdfUrl: string | null = null
+
+        if (registro.PDF) {
+          // Si el valor guardado ya es una URL, la usamos directamente.
+          if (
+            registro.PDF.startsWith("https://") ||
+            registro.PDF.startsWith("http://")
+          ) {
+            pdfUrl = registro.PDF
+          } else {
+            // Si es una ruta de Storage, generamos un enlace temporal.
+            const { data: urlData } = await supabase.storage
+              .from(BUCKET_PDF)
+              .createSignedUrl(registro.PDF, 3600)
+
+            pdfUrl = urlData?.signedUrl ?? null
+          }
+        }
+
+        return {
+          id: Number(registro.id),
+          fecha: registro.Fecha,
+          descripcion: registro.Descripcion ?? "",
+          pdf: registro.PDF,
+          pdfUrl,
+        }
+      })
     )
 
-  const [dialogAbierto, setDialogAbierto] =
-    useState(false)
-
-  const [fecha, setFecha] = useState(
-    obtenerFechaActual()
-  )
-
-  const [tipo, setTipo] =
-    useState<TipoMantenimiento | "">("")
-
-  const [descripcion, setDescripcion] =
-    useState("")
-
-  const [observaciones, setObservaciones] =
-    useState("")
+    setMantenimientos(registros)
+    setCargando(false)
+  }
 
   function abrirDialogo() {
     setFecha(obtenerFechaActual())
-    setTipo("")
     setDescripcion("")
-    setObservaciones("")
+    setArchivoPDF(null)
+    setError(null)
     setDialogAbierto(true)
   }
 
   function cerrarDialogo() {
+    if (guardando) return
     setDialogAbierto(false)
   }
 
-  function guardarMantenimiento() {
-    if (
-      !fecha ||
-      !tipo ||
-      !descripcion.trim()
-    ) {
-      return
+  async function guardarMantenimiento() {
+    if (!fecha || !descripcion.trim()) return
+
+    setGuardando(true)
+    setError(null)
+
+    let rutaPDF: string | null = null
+
+    try {
+      // Subimos el PDF si se seleccionó uno.
+      if (archivoPDF) {
+        const nombreSeguro = archivoPDF.name
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-zA-Z0-9._-]/g, "_")
+
+        rutaPDF = `${Date.now()}-${nombreSeguro}`
+
+        const { error: errorSubida } = await supabase.storage
+          .from(BUCKET_PDF)
+          .upload(rutaPDF, archivoPDF, {
+            contentType: "application/pdf",
+            upsert: false,
+          })
+
+        if (errorSubida) {
+          throw new Error(
+            `No se pudo subir el PDF: ${errorSubida.message}`
+          )
+        }
+      }
+
+      // Guardamos únicamente las columnas que existen en la tabla.
+      const { error: errorInsercion } = await supabase
+        .from("Mantenimiento_Maquina")
+        .insert({
+          Fecha: fecha,
+          Descripcion: descripcion.trim(),
+          PDF: rutaPDF,
+        })
+
+      if (errorInsercion) {
+        // Si falló el registro, intentamos eliminar el archivo subido.
+        if (rutaPDF) {
+          await supabase.storage
+            .from(BUCKET_PDF)
+            .remove([rutaPDF])
+        }
+
+        throw new Error(
+          `No se pudo guardar el mantenimiento: ${errorInsercion.message}`
+        )
+      }
+
+      setDialogAbierto(false)
+      setFecha(obtenerFechaActual())
+      setDescripcion("")
+      setArchivoPDF(null)
+
+      await cargarMantenimientos()
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Ocurrió un error inesperado."
+      )
+    } finally {
+      setGuardando(false)
     }
-
-    const nuevoMantenimiento: Mantenimiento = {
-      id: Date.now(),
-      fecha,
-      tipo,
-      descripcion: descripcion.trim(),
-      observaciones: observaciones.trim(),
-    }
-
-    setMantenimientos((actuales) => [
-      nuevoMantenimiento,
-      ...actuales,
-    ])
-
-    cerrarDialogo()
   }
 
   const formularioValido =
-    Boolean(fecha) &&
-    Boolean(tipo) &&
-    Boolean(descripcion.trim())
+    Boolean(fecha) && Boolean(descripcion.trim())
 
   return (
     <>
@@ -158,6 +224,13 @@ export function Mantenimiento() {
           </Button>
         </div>
 
+        {/* Error general */}
+        {error && (
+          <div className="rounded-lg border border-destructive/30 p-4 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+
         {/* Resumen */}
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
@@ -180,9 +253,7 @@ export function Mantenimiento() {
 
               <CardTitle className="text-xl">
                 {mantenimientos.length > 0
-                  ? formatearFecha(
-                      mantenimientos[0].fecha
-                    )
+                  ? formatearFecha(mantenimientos[0].fecha)
                   : "Sin registros"}
               </CardTitle>
             </CardHeader>
@@ -197,11 +268,15 @@ export function Mantenimiento() {
             </h3>
 
             <p className="mt-1 text-sm text-muted-foreground">
-              Registro histórico de las tareas realizadas.
+              Historial de tareas realizadas y documentación adjunta.
             </p>
           </div>
 
-          {mantenimientos.length === 0 ? (
+          {cargando ? (
+            <p className="text-sm text-muted-foreground">
+              Cargando mantenimientos...
+            </p>
+          ) : mantenimientos.length === 0 ? (
             <Card>
               <CardContent className="flex min-h-48 flex-col items-center justify-center text-center">
                 <ClipboardList className="mb-4 h-10 w-10 text-muted-foreground" />
@@ -211,8 +286,7 @@ export function Mantenimiento() {
                 </p>
 
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Registrá el primero usando el botón de
-                  arriba.
+                  Registrá el primero usando el botón de arriba.
                 </p>
               </CardContent>
             </Card>
@@ -229,13 +303,14 @@ export function Mantenimiento() {
         </div>
       </div>
 
-      {/* =====================================================
-          DIALOG — REGISTRAR MANTENIMIENTO
-          ===================================================== */}
-
+      {/* Registrar mantenimiento */}
       <Dialog
         open={dialogAbierto}
-        onOpenChange={setDialogAbierto}
+        onOpenChange={(abierto) => {
+          if (!abierto) {
+            cerrarDialogo()
+          }
+        }}
       >
         <DialogContent>
           <DialogHeader>
@@ -244,7 +319,8 @@ export function Mantenimiento() {
             </DialogTitle>
 
             <DialogDescription>
-              Completá los datos del mantenimiento realizado.
+              Ingresá la fecha, una descripción libre y, si corresponde,
+              adjuntá el PDF con el detalle del trabajo realizado.
             </DialogDescription>
           </DialogHeader>
 
@@ -266,50 +342,9 @@ export function Mantenimiento() {
                     setFecha(event.target.value)
                   }
                   className="pl-9"
+                  disabled={guardando}
                 />
               </div>
-            </div>
-
-            {/* Tipo */}
-            <div className="space-y-2">
-              <Label htmlFor="tipo-mantenimiento">
-                Tipo de mantenimiento
-              </Label>
-
-              <Select
-                value={tipo}
-                onValueChange={(value) =>
-                  setTipo(
-                    value as TipoMantenimiento
-                  )
-                }
-              >
-                <SelectTrigger id="tipo-mantenimiento">
-                  <SelectValue placeholder="Seleccionar tipo" />
-                </SelectTrigger>
-
-                <SelectContent>
-                  <SelectItem value="Limpieza">
-                    Limpieza
-                  </SelectItem>
-
-                  <SelectItem value="Cambio de pieza">
-                    Cambio de pieza
-                  </SelectItem>
-
-                  <SelectItem value="Reparación">
-                    Reparación
-                  </SelectItem>
-
-                  <SelectItem value="Inspección">
-                    Inspección
-                  </SelectItem>
-
-                  <SelectItem value="Otro">
-                    Otro
-                  </SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
             {/* Descripción */}
@@ -320,30 +355,56 @@ export function Mantenimiento() {
 
               <Textarea
                 id="descripcion-mantenimiento"
-                placeholder="¿Qué mantenimiento se realizó?"
+                placeholder="Describí brevemente el mantenimiento realizado..."
                 value={descripcion}
                 onChange={(event) =>
                   setDescripcion(event.target.value)
                 }
-                rows={3}
+                rows={4}
+                disabled={guardando}
               />
             </div>
 
-            {/* Observaciones */}
+            {/* PDF */}
             <div className="space-y-2">
-              <Label htmlFor="observaciones-mantenimiento">
-                Observaciones
+              <Label htmlFor="pdf-mantenimiento">
+                PDF del mantenimiento (opcional)
               </Label>
 
-              <Textarea
-                id="observaciones-mantenimiento"
-                placeholder="Información adicional..."
-                value={observaciones}
-                onChange={(event) =>
-                  setObservaciones(event.target.value)
-                }
-                rows={3}
+              <Input
+                id="pdf-mantenimiento"
+                type="file"
+                accept="application/pdf,.pdf"
+                disabled={guardando}
+                onChange={(event) => {
+                  const archivo = event.target.files?.[0] ?? null
+
+                  if (
+                    archivo &&
+                    archivo.type !== "application/pdf" &&
+                    !archivo.name.toLowerCase().endsWith(".pdf")
+                  ) {
+                    setError("Seleccioná un archivo PDF.")
+                    setArchivoPDF(null)
+                    event.target.value = ""
+                    return
+                  }
+
+                  setError(null)
+                  setArchivoPDF(archivo)
+                }}
               />
+
+              {archivoPDF && (
+                <p className="text-sm text-muted-foreground">
+                  Archivo seleccionado: {archivoPDF.name}
+                </p>
+              )}
+
+              <p className="text-xs text-muted-foreground">
+                Podés incluir en el PDF las observaciones y los detalles
+                del mantenimiento.
+              </p>
             </div>
           </div>
 
@@ -351,15 +412,16 @@ export function Mantenimiento() {
             <Button
               variant="outline"
               onClick={cerrarDialogo}
+              disabled={guardando}
             >
               Cancelar
             </Button>
 
             <Button
               onClick={guardarMantenimiento}
-              disabled={!formularioValido}
+              disabled={!formularioValido || guardando}
             >
-              Guardar mantenimiento
+              {guardando ? "Guardando..." : "Guardar mantenimiento"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -368,9 +430,7 @@ export function Mantenimiento() {
   )
 }
 
-/* =========================================================
-   TARJETA DE MANTENIMIENTO
-   ========================================================= */
+/* Tarjeta de mantenimiento */
 
 function MantenimientoCard({
   mantenimiento,
@@ -388,13 +448,11 @@ function MantenimientoCard({
 
             <div>
               <CardTitle className="text-lg">
-                {mantenimiento.tipo}
+                Mantenimiento #{mantenimiento.id}
               </CardTitle>
 
               <CardDescription className="mt-1">
-                {formatearFecha(
-                  mantenimiento.fecha
-                )}
+                {formatearFecha(mantenimiento.fecha)}
               </CardDescription>
             </div>
           </div>
@@ -405,47 +463,41 @@ function MantenimientoCard({
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         <div>
           <p className="text-sm font-medium">
             Descripción
           </p>
 
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
             {mantenimiento.descripcion}
           </p>
         </div>
 
-        {mantenimiento.observaciones && (
-          <div>
-            <p className="text-sm font-medium">
-              Observaciones
-            </p>
-
-            <p className="mt-1 text-sm text-muted-foreground">
-              {mantenimiento.observaciones}
-            </p>
-          </div>
+        {mantenimiento.pdfUrl && (
+          <a
+            href={mantenimiento.pdfUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-sm font-medium text-primary underline underline-offset-4"
+          >
+            <FileText className="h-4 w-4" />
+            Ver PDF del mantenimiento
+          </a>
         )}
       </CardContent>
     </Card>
   )
 }
 
-/* =========================================================
-   UTILIDADES
-   ========================================================= */
+/* Utilidades */
 
 function obtenerFechaActual() {
   const hoy = new Date()
 
   const año = hoy.getFullYear()
-  const mes = String(
-    hoy.getMonth() + 1
-  ).padStart(2, "0")
-  const dia = String(
-    hoy.getDate()
-  ).padStart(2, "0")
+  const mes = String(hoy.getMonth() + 1).padStart(2, "0")
+  const dia = String(hoy.getDate()).padStart(2, "0")
 
   return `${año}-${mes}-${dia}`
 }
