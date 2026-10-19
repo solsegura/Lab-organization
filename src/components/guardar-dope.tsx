@@ -32,6 +32,51 @@ type GuardarDopeProps = {
   datos: DatosNuevoDope
 }
 
+function RecipientePlaceholder({
+  recipiente,
+}: {
+  recipiente: Recipiente
+}) {
+  if (recipiente === "pote-1") {
+    return (
+      <div className="relative flex h-32 w-36 flex-col items-center justify-center">
+        <div className="h-8 w-36 rounded-full border-4 border-muted-foreground/40 bg-muted" />
+
+        <div className="h-24 w-32 rounded-b-2xl border-4 border-t-0 border-muted-foreground/40 bg-muted" />
+      </div>
+    )
+  }
+
+  if (recipiente === "jarra-2") {
+    return (
+      <div className="relative flex h-40 w-24 flex-col items-center justify-center">
+        <div className="h-8 w-20 rounded-full border-4 border-muted-foreground/40 bg-muted" />
+
+        <div className="h-32 w-20 rounded-b-[30%] border-4 border-t-0 border-muted-foreground/40 bg-muted" />
+      </div>
+    )
+  }
+
+  if (recipiente === "otro") {
+    return (
+      <div className="flex h-40 w-24 flex-col items-center justify-center">
+        <div className="h-8 w-24 rounded-md border-4 border-muted-foreground/40 bg-muted" />
+
+        <div className="h-32 w-20 rounded-b-lg border-4 border-t-0 border-muted-foreground/40 bg-muted" />
+      </div>
+    )
+  }
+
+  // Jarra 1 L
+  return (
+    <div className="flex h-36 w-24 flex-col items-center justify-center">
+      <div className="h-8 w-20 rounded-full border-4 border-muted-foreground/40 bg-muted" />
+
+      <div className="h-28 w-20 rounded-b-[30%] border-4 border-t-0 border-muted-foreground/40 bg-muted" />
+    </div>
+  )
+}
+
 export function GuardarDope({
   onBack,
   datos,
@@ -282,9 +327,7 @@ setMensaje(mensajeFinal)
               {/* Dibujo */}
               <div className="flex min-h-[300px] items-center justify-center rounded-lg border bg-muted/20">
                 <div className="text-center">
-                  <div className="mx-auto mb-4 flex h-40 w-28 items-center justify-center rounded-[40%] border-4 border-muted-foreground/40 bg-muted">
-                    <div className="h-28 w-16 rounded-[35%] border-2 border-muted-foreground/30" />
-                  </div>
+                  <RecipientePlaceholder recipiente={recipiente} />
 
                   <p className="text-sm text-muted-foreground">
                     {getNombreRecipiente(recipiente)}
@@ -380,6 +423,7 @@ setMensaje(mensajeFinal)
       {/* Acción final */}
       <div className="flex justify-end">
         <Button
+          className="bg-[#fc008e] text-white hover:bg-[#d9007a]"
           onClick={guardarDope}
           disabled={guardando}
         >

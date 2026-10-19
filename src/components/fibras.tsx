@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react"
-import { Scale, FlaskConical } from "lucide-react"
-
+import { Scale, FlaskConical,Waves } from "lucide-react"
+import { AccentLine } from "@/components/accent-line"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -147,17 +147,25 @@ export function Fibras() {
   return (
     <>
       <div className="space-y-8">
-        {/* Encabezado */}
-        <div>
-          <h2 className="text-3xl font-semibold tracking-tight">
-            Fibras
-          </h2>
+       {/* Encabezado */}
+<div>
+  <div className="flex items-center gap-3">
+    <Waves className="h-7 w-7 shrink-0" />
 
-          <p className="mt-2 text-muted-foreground">
-            Registro y seguimiento de las fibras obtenidas
-            durante las extrusiones.
-          </p>
-        </div>
+    <h2 className="text-3xl font-semibold leading-none tracking-tight">
+      Fibras
+    </h2>
+  </div>
+
+  <div className="ml-10">
+    <AccentLine />
+  </div>
+
+  <p className="mt-2 text-muted-foreground">
+    Registro y seguimiento de las fibras obtenidas
+    durante las extrusiones.
+  </p>
+</div>
 
         {/* Resumen */}
         <div className="grid gap-4 md:grid-cols-2">
@@ -236,6 +244,7 @@ export function Fibras() {
                         </span>
 
                         <Button
+  className="bg-[#fc008e] text-white hover:bg-[#d9007a]"
                           onClick={() => abrirDialogo(fibra)}
                         >
                           <Scale className="mr-2 h-4 w-4" />
@@ -323,6 +332,7 @@ export function Fibras() {
             </Button>
 
             <Button
+              
               onClick={guardarPeso}
               disabled={
                 guardando ||

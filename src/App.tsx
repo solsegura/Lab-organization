@@ -9,6 +9,7 @@ import {
   Wrench,
   History,
   ChevronRight,
+  Waves
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -49,7 +50,7 @@ const menuItems = [
   {
     id: "fibras" as Section,
     label: "Fibras",
-    icon: FlaskConical,
+    icon: Waves,
   },
   {
     id: "heladera" as Section,
@@ -166,19 +167,27 @@ const [datosNuevoDope, setDatosNuevoDope] = useState<DatosNuevoDope | null>(null
 
               return (
                 <Button
-                  key={item.id}
-                  variant={isActive ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => handleSectionChange(item.id)}
-                >
-                  <Icon className="mr-3 h-4 w-4" />
+  key={item.id}
+  variant={isActive ? "secondary" : "ghost"}
+  className={`relative w-full justify-start ${
+    isActive ? "before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-full before:bg-[#fc008e] before:content-['']" : ""
+  }`}
+  onClick={() => handleSectionChange(item.id)}
+>
+  <Icon
+    className="mr-3 h-4 w-4"
+    color={isActive ? "#fc008e" : "currentColor"}
+  />
 
-                  {item.label}
+  {item.label}
 
-                  {isActive && (
-                    <ChevronRight className="ml-auto h-4 w-4" />
-                  )}
-                </Button>
+  {isActive && (
+    <ChevronRight
+      className="ml-auto h-4 w-4"
+      color="#fc008e"
+    />
+  )}
+</Button>
               )
             })}
           </nav>

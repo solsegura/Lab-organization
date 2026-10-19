@@ -9,7 +9,7 @@ import {
 } from "lucide-react"
 
 import { supabase } from "@/lib/supabase"
-
+import { AccentLine } from "@/components/accent-line"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -202,26 +202,34 @@ export function Mantenimiento() {
     <>
       <div className="space-y-8">
         {/* Encabezado */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <Wrench className="h-7 w-7" />
+<div className="flex items-start justify-between gap-4">
+  <div>
+    <div className="flex items-center gap-3">
+      <Wrench className="h-7 w-7 shrink-0" />
 
-              <h2 className="text-3xl font-semibold tracking-tight">
-                Mantenimiento
-              </h2>
-            </div>
+      <h2 className="text-3xl font-semibold leading-none tracking-tight">
+        Mantenimiento
+      </h2>
+    </div>
 
-            <p className="mt-2 text-muted-foreground">
-              Registro y seguimiento de los mantenimientos
-              realizados en el laboratorio.
-            </p>
-          </div>
+    <div className="ml-10">
+      <AccentLine />
+    </div>
 
-          <Button onClick={abrirDialogo}>
-            <Plus className="mr-2 h-4 w-4" />
-            Registrar mantenimiento
-          </Button>
+    <p className="mt-2 text-muted-foreground">
+      Registro y seguimiento de los mantenimientos
+      realizados en el laboratorio.
+    </p>
+  </div>
+
+
+        <Button
+  onClick={abrirDialogo}
+  className="bg-[#fc008e] text-white hover:bg-[#d9007a]"
+>
+  <Plus className="mr-2 h-4 w-4" />
+  Registrar mantenimiento
+</Button>
         </div>
 
         {/* Error general */}

@@ -9,6 +9,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { AccentLine } from "@/components/accent-line"
 
 type Geometria = "flat" | "kidney-shape" | "circular";
 
@@ -69,6 +70,7 @@ function formatNumero(value: number | null | undefined) {
 export function Extrusion({ onBack }: ExtrusionProps) {
   const [dopes, setDopes] = useState<Dope[]>([]);
   const [extrusiones, setExtrusiones] = useState<ExtrusionRegistro[]>([]);
+  const [subiendoPDFId, setSubiendoPDFId] = useState<number | null>(null);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
@@ -166,30 +168,31 @@ export function Extrusion({ onBack }: ExtrusionProps) {
     void cargarDatos();
   }, [cargarDatos]);
 
-  async function subirPDF(extrusionId: number) {
-    if (!pdf) return null;
+  
+async function subirPDF(extrusionId: number, archivo: File) {
+  const extension = archivo.name.split(".").pop()?.toLowerCase();
 
-    const extension = pdf.name.split(".").pop()?.toLowerCase();
-    if (extension !== "pdf" || pdf.type !== "application/pdf") {
-      throw new Error("El archivo adjunto debe ser un PDF.");
-    }
-
-    const ruta = `${extrusionId}/${Date.now()}-${pdf.name.replace(
-      /[^a-zA-Z0-9._-]/g,
-      "_",
-    )}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from(PDF_BUCKET)
-      .upload(ruta, pdf, {
-        contentType: "application/pdf",
-        upsert: false,
-      });
-
-    if (uploadError) throw uploadError;
-
-    return ruta;
+  if (extension !== "pdf" || archivo.type !== "application/pdf") {
+    throw new Error("El archivo adjunto debe ser un PDF.");
   }
+
+  const ruta = `${extrusionId}/${Date.now()}-${archivo.name.replace(
+    /[^a-zA-Z0-9._-]/g,
+    "_",
+  )}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(PDF_BUCKET)
+    .upload(ruta, archivo, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+
+  if (uploadError) throw uploadError;
+
+  return ruta;
+}
+
 
   async function registrarExtrusion(event: React.FormEvent<HTMLFormElement>) {
   event.preventDefault();
@@ -268,8 +271,7 @@ if (!Number.isFinite(cantidad) || cantidad <= 0) {
 
       if (pdf) {
         try {
-          const rutaPDF = await subirPDF(Number(nuevaExtrusion.id));
-
+const rutaPDF = await subirPDF(Number(nuevaExtrusion.id), pdf);
           const { error: pdfError } = await supabase
             .from("ExtrusionFibras")
             .update({ PDF: rutaPDF })
@@ -354,6 +356,54 @@ if (!Number.isFinite(cantidad) || cantidad <= 0) {
 
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   }
+
+
+async function adjuntarPDF(registro: ExtrusionRegistro, archivo: File) {
+  if (subiendoPDFId !== null) return;
+
+  setSubiendoPDFId(registro.id);
+  setError("");
+  setMensaje("");
+
+  try {
+    const rutaPDF = await subirPDF(registro.id, archivo);
+
+    const { error: updateError } = await supabase
+      .from("ExtrusionFibras")
+      .update({ PDF: rutaPDF })
+      .eq("id", registro.id);
+
+    if (updateError) throw updateError;
+
+    // Actualizar la lista sin tener que recargar toda la pantalla.
+    setExtrusiones((actuales) =>
+      actuales.map((item) =>
+        item.id === registro.id
+          ? { ...item, PDF: rutaPDF }
+          : item,
+      ),
+    );
+
+    // Actualizar también el detalle si está abierto.
+    setDetalle((actual) =>
+      actual?.id === registro.id
+        ? { ...actual, PDF: rutaPDF }
+        : actual,
+    );
+
+    setMensaje(`PDF adjuntado a la extrusión #${registro.id}.`);
+  } catch (e) {
+    setError(
+      e instanceof Error
+        ? e.message
+        : "No se pudo adjuntar el PDF.",
+    );
+  } finally {
+    setSubiendoPDFId(null);
+  }
+}
+
+
 const dopeSeleccionado = dopes.find(
   (dope) => String(dope.id) === dopeId
 )
@@ -369,12 +419,28 @@ const dopeSeleccionado = dopes.find(
           <ArrowLeft className="h-5 w-5" />
         </button>
 
-        <div className="flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Extrusión</h1>
-          <p className="text-sm text-muted-foreground">
-            Registro de extrusiones y seguimiento de fibras.
-          </p>
-        </div>
+   <div className="flex-1">
+  <div className="flex items-center gap-3">
+    <FlaskConical className="h-7 w-7 shrink-0" />
+
+    <h1 className="text-3xl font-semibold leading-none tracking-tight">
+      Extrusión
+    </h1>
+  </div>
+
+  <div className="ml-10">
+    <AccentLine />
+  </div>
+
+  <p className="text-sm text-muted-foreground">
+    Registro de extrusiones y seguimiento de fibras.
+  </p>
+
+
+  <p className="text-sm text-muted-foreground">
+    Registro de extrusiones y seguimiento de fibras.
+  </p>
+</div>
 
         <button
           type="button"
@@ -517,10 +583,11 @@ const dopeSeleccionado = dopes.find(
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
+                
                 onClick={() => setFormacionFibras(true)}
                 className={`rounded-xl border px-4 py-2 text-sm transition ${
                   formacionFibras
-                    ? "border-primary bg-primary text-primary-foreground"
+      ? "border-[#fc008e] bg-[#fc008e] text-white"
                     : "hover:bg-muted"
                 }`}
               >
@@ -531,7 +598,7 @@ const dopeSeleccionado = dopes.find(
                 onClick={() => setFormacionFibras(false)}
                 className={`rounded-xl border px-4 py-2 text-sm transition ${
                   !formacionFibras
-                    ? "border-primary bg-primary text-primary-foreground"
+                    ? "border-[#fc008e] bg-[#fc008e] text-white"
                     : "hover:bg-muted"
                 }`}
               >
@@ -592,12 +659,12 @@ const dopeSeleccionado = dopes.find(
           
 
           <button
-            type="submit"
-            disabled={guardando || cargando || dopes.length === 0}
-            className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {guardando ? "Guardando extrusión..." : "Registrar extrusión"}
-          </button>
+  type="submit"
+  disabled={guardando || cargando || dopes.length === 0}
+  className="w-full rounded-xl bg-[#fc008e] px-4 py-3 font-medium text-white transition hover:bg-[#d9007a] disabled:cursor-not-allowed disabled:opacity-50"
+>
+  {guardando ? "Guardando extrusión..." : "Registrar extrusión"}
+</button>
         </form>
       </section>
 
@@ -682,16 +749,44 @@ const dopeSeleccionado = dopes.find(
                     Ver detalles
                   </button>
 
-                  {registro.PDF && (
-                    <button
-                      type="button"
-                      onClick={() => void abrirPDF(registro)}
-                      className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:bg-muted"
-                    >
-                      <ClipboardList className="h-4 w-4" />
-                      Abrir PDF
-                    </button>
-                  )}
+                
+{registro.PDF ? (
+  <button
+    type="button"
+    onClick={() => void abrirPDF(registro)}
+    className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:bg-muted"
+  >
+    <ClipboardList className="h-4 w-4" />
+    Abrir PDF
+  </button>
+) : (
+  <label
+    className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:bg-muted ${
+      subiendoPDFId === registro.id
+        ? "pointer-events-none opacity-50"
+        : ""
+    }`}
+  >
+    <Upload className="h-4 w-4" />
+    {subiendoPDFId === registro.id ? "Subiendo PDF..." : "Agregar PDF"}
+
+    <input
+      type="file"
+      accept="application/pdf,.pdf"
+      className="sr-only"
+      disabled={subiendoPDFId !== null}
+      onChange={(e) => {
+        const archivo = e.target.files?.[0];
+        e.target.value = "";
+
+        if (archivo) {
+          void adjuntarPDF(registro, archivo);
+        }
+      }}
+    />
+  </label>
+)}
+
                 </div>
               </article>
             ))}
@@ -781,15 +876,45 @@ const dopeSeleccionado = dopes.find(
               </div>
             </dl>
 
-            {detalle.PDF && (
-              <button
-                type="button"
-                onClick={() => void abrirPDF(detalle)}
-                className="mt-5 w-full rounded-xl border px-4 py-2.5 text-sm font-medium hover:bg-muted"
-              >
-                Abrir PDF adjunto
-              </button>
-            )}
+            
+{detalle.PDF ? (
+  <button
+    type="button"
+    onClick={() => void abrirPDF(detalle)}
+    className="mt-5 w-full rounded-xl border px-4 py-2.5 text-sm font-medium hover:bg-muted"
+  >
+    Abrir PDF adjunto
+  </button>
+) : (
+  <label
+    className={`mt-5 flex cursor-pointer items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition hover:bg-muted ${
+      subiendoPDFId === detalle.id
+        ? "pointer-events-none opacity-50"
+        : ""
+    }`}
+  >
+    <Upload className="h-4 w-4" />
+    {subiendoPDFId === detalle.id
+      ? "Subiendo PDF..."
+      : "Agregar PDF adjunto"}
+
+    <input
+      type="file"
+      accept="application/pdf,.pdf"
+      className="sr-only"
+      disabled={subiendoPDFId !== null}
+      onChange={(e) => {
+        const archivo = e.target.files?.[0];
+        e.target.value = "";
+
+        if (archivo) {
+          void adjuntarPDF(detalle, archivo);
+        }
+      }}
+    />
+  </label>
+)}
+
           </div>
         </div>
       )}

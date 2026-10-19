@@ -11,6 +11,8 @@ import {
   Wrench,
 } from "lucide-react"
 
+import { AccentLine } from "@/components/accent-line"
+
 import { supabase } from "@/lib/supabase"
 
 import { Button } from "@/components/ui/button"
@@ -275,19 +277,23 @@ export function Historial() {
   return (
     <div className="space-y-8">
       {/* Encabezado */}
-      <div>
-        <div className="flex items-center gap-3">
-          <ClipboardList className="h-7 w-7" />
+<div>
+  <div className="flex items-center gap-3">
+    <ClipboardList className="h-7 w-7 shrink-0" />
 
-          <h2 className="text-3xl font-semibold tracking-tight">
-            Historial
-          </h2>
-        </div>
+    <h2 className="text-3xl font-semibold leading-none tracking-tight">
+      Historial
+    </h2>
+  </div>
 
-        <p className="mt-2 text-muted-foreground">
-          Actividad general registrada en el laboratorio.
-        </p>
-      </div>
+  <div className="ml-10">
+    <AccentLine />
+  </div>
+
+  <p className="mt-2 text-muted-foreground">
+    Actividad general registrada en el laboratorio.
+  </p>
+</div>
 
       {/* Búsqueda */}
       <Card>
@@ -318,16 +324,21 @@ export function Historial() {
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2">
-        {filtros.map((opcion) => (
-          <Button
-            key={opcion}
-            variant={filtro === opcion ? "secondary" : "outline"}
-            onClick={() => setFiltro(opcion)}
-          >
-            {opcion}
-          </Button>
-        ))}
-      </div>
+  {filtros.map((opcion) => (
+    <Button
+      key={opcion}
+      variant={filtro === opcion ? "default" : "outline"}
+      className={
+        filtro === opcion
+          ? "bg-[#fc008e] text-white hover:bg-[#d9007a]"
+          : ""
+      }
+      onClick={() => setFiltro(opcion)}
+    >
+      {opcion}
+    </Button>
+  ))}
+</div>
 
       {/* Estado de carga y errores */}
       {error && (

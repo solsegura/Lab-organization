@@ -261,8 +261,17 @@ const continuar = () => {
   value={nmmoId}
   onValueChange={(value) => setNmmoId(value ?? "")}
 >          <SelectTrigger id="nmmo">
-            <SelectValue placeholder="Seleccionar NMMO" />
-          </SelectTrigger>
+<SelectValue placeholder="Seleccionar NMMO">
+  {(() => {
+    const seleccionado = nmmos.find(
+      (item) => String(item.id) === nmmoId
+    );
+
+    return seleccionado
+      ? `${seleccionado.Identificacion?.trim() || "NMMO"} — ${seleccionado.cantRestante.toLocaleString("es-AR")} g disponibles`
+      : undefined;
+  })()}
+</SelectValue>          </SelectTrigger>
 
           <SelectContent>
             {nmmos.map((item) => (
@@ -303,8 +312,17 @@ const continuar = () => {
   value={celulosaId}
   onValueChange={(value) => setCelulosaId(value ?? "")}
 >          <SelectTrigger id="celulosa">
-            <SelectValue placeholder="Seleccionar celulosa" />
-          </SelectTrigger>
+<SelectValue placeholder="Seleccionar celulosa">
+  {(() => {
+    const seleccionado = celulosas.find(
+      (item) => String(item.id) === celulosaId
+    );
+
+    return seleccionado
+      ? `${seleccionado.Marca} — ${seleccionado.cantRestante.toLocaleString("es-AR")} g disponibles`
+      : undefined;
+  })()}
+</SelectValue>          </SelectTrigger>
 
           <SelectContent>
             {celulosas.map((item) => (
@@ -447,7 +465,10 @@ onChange={(event) => setConcentracionMedida(event.target.value)}
 
       {/* Continuar */}
       <div className="flex justify-end">
-       <Button onClick={continuar}>
+       <Button 
+         className="bg-[#fc008e] text-white hover:bg-[#d9007a]"
+
+       onClick={continuar}>
   Continuar
 </Button>
       </div>

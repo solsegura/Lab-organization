@@ -11,6 +11,9 @@ import {
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { AccentLine } from "@/components/accent-line"
+
+
 import {
   Card,
   CardContent,
@@ -322,13 +325,18 @@ return (
             ===================================================== */}
 
         <div>
-          <div className="flex items-center gap-3">
-            <Beaker className="h-7 w-7" />
+  <div className="flex items-center gap-3">
+    <Beaker className="h-7 w-7 shrink-0" />
 
-            <h2 className="text-3xl font-semibold tracking-tight">
-              Preparación
-            </h2>
-          </div>
+    <h1 className="text-3xl font-semibold leading-none tracking-tight">
+      Preparación de DOPE
+    </h1>
+  </div>
+
+  <div className="ml-10">
+    <AccentLine />
+  </div>
+
 
           <p className="mt-2 text-muted-foreground">
             Gestión y registro de los DOPE preparados en el

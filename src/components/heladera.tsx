@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from "react"
 import { Plus, Snowflake, Trash2 } from "lucide-react"
+import { AccentLine } from "@/components/accent-line"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -47,35 +48,6 @@ type DopeHeladera = {
   volumen: number
 }
 
-const dopesIniciales: DopeHeladera[] = [
-  {
-    dope: {
-      id: 24,
-      peso: 1000,
-      estado: "Molido",
-    },
-    recipiente: "jarra-1",
-    volumen: 1,
-  },
-  {
-    dope: {
-      id: 31,
-      peso: 750,
-      estado: "Sin moler",
-    },
-    recipiente: "jarra-2",
-    volumen: 2,
-  },
-  {
-    dope: {
-      id: 35,
-      peso: 500,
-      estado: "Molido",
-    },
-    recipiente: "pote-1",
-    volumen: 1,
-  },
-]
 
 const dopesDisponiblesIniciales: Dope[] = [
   
@@ -401,26 +373,37 @@ useEffect(() => {
   }
 }, [])
 console.log("DOPE disponibles:", dopesDisponibles)
-  return (
+const dopesParaAlmacenar = dopesDisponibles.filter(
+  (dope) => dope.estado?.toLowerCase() !== "extruido"
+)  
+return (
     <>
       <div className="space-y-8">
         {/* Encabezado */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <Snowflake className="h-7 w-7" />
+<div className="flex items-start justify-between gap-4">
+  <div>
+    <div className="flex items-center gap-3">
+      <Snowflake className="h-7 w-7 shrink-0" />
 
-              <h2 className="text-3xl font-semibold tracking-tight">
-                Heladera
-              </h2>
-            </div>
+      <h2 className="text-3xl font-semibold leading-none tracking-tight">
+        Heladera
+      </h2>
+    </div>
+
+    <div className="ml-10">
+      <AccentLine />
+    </div>
+  
 
             <p className="mt-2 text-muted-foreground">
               DOPE almacenados actualmente en la heladera.
             </p>
           </div>
 
-          <Button onClick={abrirAgregar}>
+          <Button 
+            className="bg-[#fc008e] text-white hover:bg-[#d9007a]"
+
+          onClick={abrirAgregar}>
             <Plus className="mr-2 h-4 w-4" />
             Agregar DOPE
           </Button>
@@ -496,7 +479,7 @@ console.log("DOPE disponibles:", dopesDisponibles)
           <div className="space-y-3">
             <Label>DOPE</Label>
 
-            {dopesDisponibles.length === 0 ? (
+            {dopesParaAlmacenar.length === 0 ? (
               <div className="rounded-lg border p-4 text-center text-sm text-muted-foreground">
                 No hay DOPE disponibles para almacenar.
               </div>
@@ -512,7 +495,9 @@ console.log("DOPE disponibles:", dopesDisponibles)
                 }
                 className="space-y-3"
               >
-                {dopesDisponibles.map((dope) => (
+                {dopesDisponibles
+  .filter((dope) => dope.estado?.toLowerCase() !== "extruido")
+  .map((dope) => (
                   <Label
                     key={dope.id}
                     htmlFor={`dope-${dope.id}`}
