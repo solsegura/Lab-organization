@@ -9,7 +9,8 @@ import {
   Wrench,
   History,
   ChevronRight,
-  Waves
+  Waves,
+  FileText,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -21,6 +22,7 @@ import { Fibras } from "@/components/fibras"
 import { Heladera } from "@/components/heladera"
 import { Mantenimiento } from "@/components/mantenimiento"
 import { Historial } from "@/components/historial"
+import { Documentacion } from "@/components/documentacion"
 
 type Section =
   | "preparacion"
@@ -29,6 +31,7 @@ type Section =
   | "heladera"
   | "mantenimiento"
   | "historial"
+  | "documentacion"
 
 type PreparacionView =
   | "menu"
@@ -66,6 +69,11 @@ const menuItems = [
     id: "historial" as Section,
     label: "Historial",
     icon: History,
+  },
+    {
+    id: "documentacion" as Section,
+    label: "Documentación",
+    icon: FileText,
   },
 ]
 
@@ -233,9 +241,11 @@ const [datosNuevoDope, setDatosNuevoDope] = useState<DatosNuevoDope | null>(null
 ) : activeSection === "heladera" ? (
   <Heladera />
  ) : activeSection === "mantenimiento" ? (
-  <Mantenimiento />) 
-: activeSection === "historial" ? (
+  <Mantenimiento />)
+  : activeSection === "historial" ? (
   <Historial />
+) : activeSection === "documentacion" ? (
+  <Documentacion />
 ) : (
   <div>
     <h2 className="text-3xl font-semibold">
