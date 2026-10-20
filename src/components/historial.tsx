@@ -27,7 +27,6 @@ import { Input } from "@/components/ui/input"
 
 type TipoEvento =
   | "Preparación"
-  | "Heladera"
   | "Extrusión"
   | "Fibras"
   | "Mantenimiento"
@@ -44,7 +43,6 @@ type Evento = {
 const filtros: Array<"Todos" | TipoEvento> = [
   "Todos",
   "Preparación",
-  "Heladera",
   "Extrusión",
   "Fibras",
   "Mantenimiento",
@@ -65,41 +63,52 @@ export function Historial() {
     setCargando(true)
     setError(null)
 
-    const [
-      preparacionesResult,
-      dopesResult,
-      extrusionesResult,
-      fibrasResult,
-      mantenimientosResult,
-    ] = await Promise.all([
-      supabase
-        .from("PreparacionDOPE")
-        .select('id, "DOPE"'),
+    
+const [
+  preparacionesResult,
+  dopesResult,
+  extrusionesResult,
+  relacionesDopesResult,
+  fibrasResult,
+  mantenimientosResult,
+] = await Promise.all([
+  supabase
+    .from("PreparacionDOPE")
+    .select('id, "DOPE"'),
 
-      supabase
-        .from("DOPE")
-        .select('id, "FechaPreparacion", "Peso", "Estado"'),
+  supabase
+    .from("DOPE")
+    .select('id, "FechaPreparacion", "Peso", "Estado"'),
 
-      supabase
-        .from("ExtrusionFibras")
-        .select('id, "DOPE", "Fibras", "Fecha", "CantDOPE"'),
+  supabase
+    .from("ExtrusionFibras")
+    .select('id, "DOPE", "Fibras", "Fecha", "CantDOPE"'),
 
-      supabase
-        .from("Fibras")
-        .select('id, "Peso", "Fecha", "Geometria"'),
+  supabase
+    .from("DOPE_Extrusion")
+    .select('extrusion_id, dope_id, "CantDOPE"'),
 
-      supabase
-        .from("Mantenimiento_Maquina")
-        .select('id, "Fecha", "Descripcion", "PDF"'),
-    ])
+  supabase
+    .from("Fibras")
+    .select('id, "Peso", "Fecha", "Geometria"'),
 
-    const errores = [
-      preparacionesResult.error,
-      dopesResult.error,
-      extrusionesResult.error,
-      fibrasResult.error,
-      mantenimientosResult.error,
-    ].filter(Boolean)
+  supabase
+    .from("Mantenimiento_Maquina")
+    .select('id, "Fecha", "Descripcion", "PDF"'),
+])
+
+
+
+   
+const errores = [
+  preparacionesResult.error,
+  dopesResult.error,
+  extrusionesResult.error,
+  relacionesDopesResult.error,
+  fibrasResult.error,
+  mantenimientosResult.error,
+].filter(Boolean)
+
 
     if (errores.length > 0) {
       setError(
@@ -114,6 +123,26 @@ export function Historial() {
     const extrusiones = extrusionesResult.data ?? []
     const fibras = fibrasResult.data ?? []
     const mantenimientos = mantenimientosResult.data ?? []
+
+
+const relacionesDopes = relacionesDopesResult.data ?? []
+
+const dopesPorExtrusion = new Map<
+  number,
+  Array<{ dope_id: number; CantDOPE: number }>
+>()
+
+for (const relacion of relacionesDopes) {
+  const lista = dopesPorExtrusion.get(Number(relacion.extrusion_id)) ?? []
+
+  lista.push({
+    dope_id: Number(relacion.dope_id),
+    CantDOPE: Number(relacion.CantDOPE),
+  })
+
+  dopesPorExtrusion.set(Number(relacion.extrusion_id), lista)
+}
+
 
     const eventosNuevos: Evento[] = []
 
@@ -152,37 +181,56 @@ export function Historial() {
     // EXTRUSIÓN
     // -----------------------------------------------------
 
-    for (const extrusion of extrusiones) {
-      if (!extrusion.Fecha) continue
 
-      const fibraRelacionada = fibras.find(
-        (fibra) =>
-          extrusion.Fibras != null &&
-          Number(fibra.id) === Number(extrusion.Fibras)
-      )
+for (const extrusion of extrusiones) {
+  if (!extrusion.Fecha) continue
 
-      const detalles: string[] = []
+  const fibraRelacionada = fibras.find(
+    (fibra) =>
+      extrusion.Fibras != null &&
+      Number(fibra.id) === Number(extrusion.Fibras)
+  )
 
-      if (extrusion.DOPE != null) {
-        detalles.push(`DOPE #${extrusion.DOPE}`)
-      }
+  const detalles: string[] = []
 
-      if (fibraRelacionada?.Geometria) {
-        detalles.push(`Geometría ${fibraRelacionada.Geometria}`)
-      }
+  // Preferir la tabla nueva, que permite varios DOPE por extrusión.
+  // Si no hay relación nueva, usar los campos antiguos para el historial.
+  const dopesUsados = dopesPorExtrusion.get(Number(extrusion.id))
 
-      if (extrusion.CantDOPE != null) {
-        detalles.push(`Consumo de DOPE: ${extrusion.CantDOPE} g`)
-      }
+  if (dopesUsados && dopesUsados.length > 0) {
+    const listaDopes = dopesUsados
+      .map((item) => `DOPE #${item.dope_id}: ${item.CantDOPE} g`)
+      .join(", ")
 
-      eventosNuevos.push({
-        id: `extrusion-${extrusion.id}`,
-        fecha: extrusion.Fecha,
-        tipo: "Extrusión",
-        titulo: `Extrusión #${extrusion.id}`,
-        descripcion: detalles.join(" · ") || "Extrusión registrada",
-      })
+    const consumoTotal = dopesUsados.reduce(
+      (total, item) => total + item.CantDOPE,
+      0
+    )
+
+    detalles.push(`DOPE utilizados: ${listaDopes}`)
+    detalles.push(`Consumo total: ${consumoTotal} g`)
+  } else if (extrusion.DOPE != null) {
+    // Compatibilidad con extrusiones anteriores a DOPE_Extrusion.
+    detalles.push(`DOPE #${extrusion.DOPE}`)
+
+    if (extrusion.CantDOPE != null) {
+      detalles.push(`Consumo de DOPE: ${extrusion.CantDOPE} g`)
     }
+  }
+
+  if (fibraRelacionada?.Geometria) {
+    detalles.push(`Geometría ${fibraRelacionada.Geometria}`)
+  }
+
+  eventosNuevos.push({
+    id: `extrusion-${extrusion.id}`,
+    fecha: extrusion.Fecha,
+    tipo: "Extrusión",
+    titulo: `Extrusión #${extrusion.id}`,
+    descripcion: detalles.join(" · ") || "Extrusión registrada",
+  })
+}
+
 
     // -----------------------------------------------------
     // FIBRAS
@@ -463,8 +511,7 @@ function getIconoEvento(tipo: TipoEvento) {
   switch (tipo) {
     case "Preparación":
       return Beaker
-    case "Heladera":
-      return Snowflake
+    
     case "Extrusión":
       return FlaskConical
     case "Fibras":

@@ -26,8 +26,13 @@ type ExtrusionRegistro = {
   id: number;
   Fecha: string | null;
   DOPE: number | null;
-  Fibras: number;
+  Fibras: number | null;
   CantDOPE: number | null;
+  dopesUsados?: Array<{
+    dope_id: number;
+    CantDOPE: number;
+    dope: Dope | null;
+  }>;
   PDF: string | null;
   FormacionFibras: boolean | null;
   fibra?: {
@@ -80,9 +85,10 @@ export function Extrusion({ onBack }: ExtrusionProps) {
   const [fecha, setFecha] = useState(
     new Date().toLocaleDateString("en-CA"),
   );
-  const [dopeId, setDopeId] = useState("");
+  const [dopesUsados, setDopesUsados] = useState([
+    { dopeId: "", cantidad: "" },
+  ]);
   const [geometria, setGeometria] = useState<Geometria>("circular");
-  const [cantidadDope, setCantidadDope] = useState("");
   const [formacionFibras, setFormacionFibras] = useState(true);
   const [dopeRecuperado, setDopeRecuperado] = useState(false);
   const [cantidadRecuperada, setCantidadRecuperada] = useState("");
@@ -93,21 +99,28 @@ export function Extrusion({ onBack }: ExtrusionProps) {
     setError("");
 
     try {
-      const [dopesResult, heladeraResult, extrusionesResult, fibrasResult] =
-        await Promise.all([
-          supabase.from("DOPE").select("*"),
-          supabase.from("DOPE_Heladera").select('"DOPE"'),
-          supabase
-            .from("ExtrusionFibras")
-            .select("*")
-            .order("id", { ascending: false }),
-          supabase.from("Fibras").select("*"),
-        ]);
+      const [
+        dopesResult,
+        heladeraResult,
+        extrusionesResult,
+        fibrasResult,
+        relacionesResult,
+      ] = await Promise.all([
+        supabase.from("DOPE").select("*"),
+        supabase.from("DOPE_Heladera").select('"DOPE"'),
+        supabase
+          .from("ExtrusionFibras")
+          .select("*")
+          .order("id", { ascending: false }),
+        supabase.from("Fibras").select("*"),
+        supabase.from("DOPE_Extrusion").select("*"),
+      ]);
 
       if (dopesResult.error) throw dopesResult.error;
       if (heladeraResult.error) throw heladeraResult.error;
       if (extrusionesResult.error) throw extrusionesResult.error;
       if (fibrasResult.error) throw fibrasResult.error;
+      if (relacionesResult.error) throw relacionesResult.error;
 
       const todosLosDopes = (dopesResult.data ?? []) as Dope[];
       const idsEnHeladera = new Set(
@@ -136,23 +149,44 @@ export function Extrusion({ onBack }: ExtrusionProps) {
 
       const mapaDopes = new Map(todosLosDopes.map((d) => [d.id, d]));
       const mapaFibras = new Map(fibras.map((f) => [f.id, f]));
+      const relacionesPorExtrusion = new Map<
+        number,
+        Array<{ dope_id: number; CantDOPE: number; dope: Dope | null }>
+      >();
+
+      for (const relacion of (relacionesResult.data ?? []) as Array<{
+        extrusion_id: number;
+        dope_id: number;
+        CantDOPE: number;
+      }>) {
+        const lista = relacionesPorExtrusion.get(relacion.extrusion_id) ?? [];
+        lista.push({
+          dope_id: relacion.dope_id,
+          CantDOPE: relacion.CantDOPE,
+          dope: mapaDopes.get(relacion.dope_id) ?? null,
+        });
+        relacionesPorExtrusion.set(relacion.extrusion_id, lista);
+      }
 
       const registros = ((extrusionesResult.data ?? []) as ExtrusionRegistro[])
         .map((registro) => ({
           ...registro,
-          dope: registro.DOPE ? mapaDopes.get(registro.DOPE) ?? null : null,
-          fibra: mapaFibras.get(registro.Fibras) ?? null,
+          dopesUsados:
+            relacionesPorExtrusion.get(registro.id) ??
+            (registro.DOPE != null && registro.CantDOPE != null
+              ? [{
+                  dope_id: registro.DOPE,
+                  CantDOPE: registro.CantDOPE,
+                  dope: mapaDopes.get(registro.DOPE) ?? null,
+                }]
+              : []),
+          fibra: registro.Fibras != null
+            ? mapaFibras.get(registro.Fibras) ?? null
+            : null,
         }));
 
       setDopes(dopesDisponibles);
       setExtrusiones(registros);
-
-      if (
-        dopeId &&
-        !dopesDisponibles.some((dope) => String(dope.id) === dopeId)
-      ) {
-        setDopeId("");
-      }
     } catch (e) {
       setError(
         e instanceof Error
@@ -162,7 +196,7 @@ export function Extrusion({ onBack }: ExtrusionProps) {
     } finally {
       setCargando(false);
     }
-  }, [dopeId]);
+  }, []);
 
   useEffect(() => {
     void cargarDatos();
@@ -195,43 +229,64 @@ async function subirPDF(extrusionId: number, archivo: File) {
 
 
   async function registrarExtrusion(event: React.FormEvent<HTMLFormElement>) {
-  event.preventDefault();
-  console.log("Datos del formulario:", {
-  fecha,
-  dopeId,
-  geometria,
-  cantidadDope,
-  formacionFibras,
-  dopeRecuperado,
-  cantidadRecuperada,
-});
     event.preventDefault();
     setError("");
     setMensaje("");
 
-    if (!dopeId) {
-  setError("Seleccioná el DOPE utilizado.");
-  return;
-}
+    const cantidades = dopesUsados.map((item) => ({
+      dope_id: Number(item.dopeId),
+      cantidad: Number(item.cantidad),
+    }));
 
-if (!geometria) {
-  setError("Seleccioná una geometría.");
-  return;
-}
+    if (
+      cantidades.length === 0 ||
+      dopesUsados.some((item) => !item.dopeId || !item.cantidad.trim())
+    ) {
+      setError("Seleccioná cada DOPE utilizado e ingresá su cantidad.");
+      return;
+    }
 
-if (!cantidadDope.trim()) {
-  setError("Ingresá la cantidad de DOPE utilizada.");
-  return;
-}
+    if (
+      cantidades.some(
+        (item) =>
+          !Number.isInteger(item.dope_id) ||
+          item.dope_id <= 0 ||
+          !Number.isFinite(item.cantidad) ||
+          item.cantidad <= 0,
+      )
+    ) {
+      setError("Cada cantidad de DOPE debe ser un número mayor que cero.");
+      return;
+    }
 
+    const idsSeleccionados = cantidades.map((item) => item.dope_id);
+    if (new Set(idsSeleccionados).size !== idsSeleccionados.length) {
+      setError("No selecciones el mismo DOPE más de una vez. Sumá sus cantidades en una sola fila.");
+      return;
+    }
 
+    for (const item of cantidades) {
+      const dope = dopes.find((d) => d.id === item.dope_id);
+      if (!dope) {
+        setError(`El DOPE #${item.dope_id} ya no está disponible en la heladera.`);
+        return;
+      }
+      if (
+        dope.MasaRestante != null &&
+        Math.round(item.cantidad * 100) / 100 >
+          Math.round(Number(dope.MasaRestante) * 100) / 100
+      ) {
+        setError(
+          `El DOPE #${item.dope_id} tiene ${formatNumero(dope.MasaRestante)} g disponibles y solicitaste ${formatNumero(item.cantidad)} g.`,
+        );
+        return;
+      }
+    }
 
-const cantidad = Number(cantidadDope);
-
-if (!Number.isFinite(cantidad) || cantidad <= 0) {
-  setError("La cantidad de DOPE debe ser mayor que cero.");
-  return;
-}
+    if (!geometria) {
+      setError("Seleccioná una geometría.");
+      return;
+    }
 
     const recuperada = dopeRecuperado
       ? Number(cantidadRecuperada)
@@ -253,29 +308,34 @@ if (!Number.isFinite(cantidad) || cantidad <= 0) {
     setGuardando(true);
 
     try {
-      // El trigger de la base de datos gestiona la relación con Fibras
-      // y la actualización de la cantidad restante del DOPE.
-      const { data: nuevaExtrusion, error: insertError } = await supabase
-        .from("ExtrusionFibras")
-        .insert({
-  Fecha: fecha,
-  DOPE: Number(dopeId),
-  CantDOPE: cantidad,
-  FormacionFibras: formacionFibras,
-  Geometria: geometria,
-})
-        .select("*")
-        .single();
+      // La función SQL crea la extrusión y sus relaciones en una transacción.
+      // Los triggers de DOPE_Extrusion descuentan cada cantidad utilizada.
+      const { data: nuevaExtrusionId, error: insertError } = await supabase.rpc(
+        "registrar_extrusion_con_dopes",
+        {
+          p_fecha: fecha,
+          p_geometria: geometria,
+          p_formacion_fibras: formacionFibras,
+          p_dopes: cantidades.map((item) => ({
+            dope_id: item.dope_id,
+            cantidad: item.cantidad,
+          })),
+        },
+      );
 
       if (insertError) throw insertError;
+      const extrusionId = Number(nuevaExtrusionId);
+      if (!Number.isFinite(extrusionId) || extrusionId <= 0) {
+        throw new Error("La base de datos no devolvió el ID de la extrusión.");
+      }
 
       if (pdf) {
         try {
-const rutaPDF = await subirPDF(Number(nuevaExtrusion.id), pdf);
+          const rutaPDF = await subirPDF(extrusionId, pdf);
           const { error: pdfError } = await supabase
             .from("ExtrusionFibras")
             .update({ PDF: rutaPDF })
-            .eq("id", nuevaExtrusion.id);
+            .eq("id", extrusionId);
 
           if (pdfError) throw pdfError;
         } catch (pdfError) {
@@ -289,18 +349,16 @@ const rutaPDF = await subirPDF(Number(nuevaExtrusion.id), pdf);
         }
       }
 
-      // El DOPE recuperado se registra como un nuevo DOPE relacionado
-      // con esta extrusión. La cantidad restante del DOPE original
-      // ya la gestiona el trigger de la base de datos.
+      // El material recuperado se registra como un único DOPE mezclado.
       if (dopeRecuperado && recuperada != null) {
         const { error: recuperadoError } = await supabase.from("DOPE").insert({
-  Peso: recuperada,
-  MasaRestante: recuperada,
-  FechaPreparacion: fecha,
-  Estado: "sin moler",
-  Recuperado: true,
-  RecuperadoDe: nuevaExtrusion.id,
-});
+          Peso: recuperada,
+          MasaRestante: recuperada,
+          FechaPreparacion: fecha,
+          Estado: "sin moler",
+          Recuperado: true,
+          RecuperadoDe: extrusionId,
+        });
 
         if (recuperadoError) {
           throw new Error(
@@ -310,7 +368,7 @@ const rutaPDF = await subirPDF(Number(nuevaExtrusion.id), pdf);
       }
 
       setMensaje("Extrusión registrada correctamente.");
-      setCantidadDope("");
+      setDopesUsados([{ dopeId: "", cantidad: "" }]);
       setFormacionFibras(true);
       setDopeRecuperado(false);
       setCantidadRecuperada("");
@@ -404,9 +462,28 @@ async function adjuntarPDF(registro: ExtrusionRegistro, archivo: File) {
 }
 
 
-const dopeSeleccionado = dopes.find(
-  (dope) => String(dope.id) === dopeId
-)
+function actualizarDopeUsado(
+  indice: number,
+  campo: "dopeId" | "cantidad",
+  valor: string,
+) {
+  setDopesUsados((actuales) =>
+    actuales.map((item, i) =>
+      i === indice ? { ...item, [campo]: valor } : item,
+    ),
+  );
+}
+
+function agregarDopeUsado() {
+  setDopesUsados((actuales) => [...actuales, { dopeId: "", cantidad: "" }]);
+}
+
+function quitarDopeUsado(indice: number) {
+  setDopesUsados((actuales) =>
+    actuales.length > 1 ? actuales.filter((_, i) => i !== indice) : actuales,
+  );
+}
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-8 p-4 md:p-8">
       <div className="flex items-center gap-3">
@@ -432,9 +509,7 @@ const dopeSeleccionado = dopes.find(
     <AccentLine />
   </div>
 
-  <p className="text-sm text-muted-foreground">
-    Registro de extrusiones y seguimiento de fibras.
-  </p>
+  
 
 
   <p className="text-sm text-muted-foreground">
@@ -478,7 +553,7 @@ const dopeSeleccionado = dopes.find(
           <div>
             <h2 className="text-lg font-semibold">Registrar extrusión</h2>
             <p className="text-sm text-muted-foreground">
-              Seleccioná el DOPE y completá los parámetros del proceso.
+              Agregá uno o más DOPE e indicá la cantidad utilizada de cada uno.
             </p>
           </div>
         </div>
@@ -496,33 +571,125 @@ const dopeSeleccionado = dopes.find(
               />
             </label>
 
-            <label className="space-y-2 text-sm font-medium">
-              DOPE utilizado
-              <select
-                value={dopeId}
-                onChange={(e) => setDopeId(e.target.value)}
-                required
-                className="w-full rounded-xl border bg-background px-3 py-2.5 font-normal"
-              >
-                <option value="">
-                  {cargando ? "Cargando DOPE..." : "Seleccionar DOPE"}
-                </option>
-                {dopes.map((dope) => (
-                  <option key={dope.id} value={dope.id}>
-                    DOPE #{dope.id}
-                    {dope.Peso != null ? ` · ${formatNumero(dope.Peso)} g` : ""}
-                    {dope.MasaRestante != null
-                      ? ` · Restante: ${formatNumero(dope.MasaRestante)} g`
-                      : ""}
-                  </option>
-                ))}
-              </select>
+            <div className="space-y-3 md:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium">DOPE utilizado</span>
+                <button
+                  type="button"
+                  onClick={agregarDopeUsado}
+                  disabled={cargando || dopes.length === 0}
+                  className="rounded-lg border px-3 py-1.5 text-sm font-medium transition hover:bg-muted disabled:opacity-50"
+                >
+                  + Agregar otro DOPE
+                </button>
+              </div>
+
+              {dopesUsados.map((item, indice) => {
+                const dopeSeleccionado = dopes.find(
+                  (dope) => String(dope.id) === item.dopeId,
+                );
+
+                return (
+                  <div
+                    key={indice}
+                    className="grid gap-3 rounded-xl border p-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,0.7fr)_auto]"
+                  >
+                    <label className="space-y-2 text-sm font-medium">
+                      {`DOPE ${indice + 1}`}
+                      <select
+                        value={item.dopeId}
+                        onChange={(e) =>
+                          actualizarDopeUsado(indice, "dopeId", e.target.value)
+                        }
+                        required
+                        className="w-full rounded-xl border bg-background px-3 py-2.5 font-normal"
+                      >
+                        <option value="">
+                          {cargando ? "Cargando DOPE..." : "Seleccionar DOPE"}
+                        </option>
+                        {dopes.map((dope) => {
+                          const yaSeleccionado = dopesUsados.some(
+                            (otro, otroIndice) =>
+                              otroIndice !== indice &&
+                              otro.dopeId === String(dope.id),
+                          );
+                          return (
+                            <option
+                              key={dope.id}
+                              value={dope.id}
+                              disabled={yaSeleccionado}
+                            >
+                              {`DOPE #${dope.id}`}
+                              {dope.Peso != null
+                                ? ` · ${formatNumero(dope.Peso)} g`
+                                : ""}
+                              {dope.MasaRestante != null
+                                ? ` · Restante: ${formatNumero(dope.MasaRestante)} g`
+                                : ""}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+
+                    <label className="space-y-2 text-sm font-medium">
+                      <span className="flex items-center justify-between gap-2">
+                        <span>Cantidad (g)</span>
+                        <button
+                          type="button"
+                          disabled={
+                            dopeSeleccionado?.MasaRestante == null ||
+                            Number(dopeSeleccionado.MasaRestante) <= 0
+                          }
+                          onClick={() => {
+                            if (dopeSeleccionado?.MasaRestante != null) {
+                              actualizarDopeUsado(
+                                indice,
+                                "cantidad",
+                                String(dopeSeleccionado.MasaRestante),
+                              );
+                            }
+                          }}
+                          className="text-xs font-medium text-primary underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Usar todo
+                        </button>
+                      </span>
+                      <input
+                        type="number"
+                        min="0.001"
+                        step="any"
+                        value={item.cantidad}
+                        onChange={(e) =>
+                          actualizarDopeUsado(indice, "cantidad", e.target.value)
+                        }
+                        required
+                        placeholder="Ej. 25"
+                        className="w-full rounded-xl border bg-background px-3 py-2.5 font-normal"
+                      />
+                    </label>
+
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        onClick={() => quitarDopeUsado(indice)}
+                        disabled={dopesUsados.length === 1}
+                        aria-label={`Quitar DOPE ${indice + 1}`}
+                        className="w-full rounded-xl border px-3 py-2.5 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 md:w-auto"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
               {!cargando && dopes.length === 0 && (
                 <span className="block text-xs font-normal text-muted-foreground">
                   No hay DOPE disponible en la heladera.
                 </span>
               )}
-            </label>
+            </div>
 
             <label className="space-y-2 text-sm font-medium">
               Geometría
@@ -539,43 +706,7 @@ const dopeSeleccionado = dopes.find(
             </label>
 
             
-<label className="space-y-2 text-sm font-medium">
-  <div className="flex items-center justify-between gap-3">
-    <span>Cantidad de DOPE utilizada (g)</span>
 
-    <button
-      type="button"
-      disabled={
-        dopeSeleccionado?.MasaRestante == null ||
-        Number(dopeSeleccionado.MasaRestante) <= 0
-      }
-      onClick={() => {
-        if (dopeSeleccionado?.MasaRestante != null) {
-          setCantidadDope(String(dopeSeleccionado.MasaRestante))
-        }
-      }}
-      className="text-xs font-medium text-primary underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      Usar todo (
-      {dopeSeleccionado?.MasaRestante != null
-        ? `${formatNumero(dopeSeleccionado.MasaRestante)} g`
-        : "—"}
-      )
-    </button>
-  </div>
-
-  <input
-    type="number"
-    min="0.001"
-    step="any"
-    value={cantidadDope}
-    onChange={(e) => setCantidadDope(e.target.value)}
-    required
-    placeholder="Ej. 25"
-    className="w-full rounded-xl border bg-background px-3 py-2.5 font-normal"
-  />
-</label>
-```
           </div>
 
           <div className="rounded-xl border p-4">
@@ -701,7 +832,11 @@ const dopeSeleccionado = dopes.find(
                       Extrusión #{registro.id}
                     </p>
                     <h3 className="mt-1 font-semibold">
-                      DOPE #{registro.DOPE ?? "—"}
+                      {registro.dopesUsados && registro.dopesUsados.length > 0
+                        ? registro.dopesUsados
+                            .map((item) => `DOPE #${item.dope_id}`)
+                            .join(" + ")
+                        : "Sin DOPE asociado"}
                     </h3>
                     <p className="text-sm text-muted-foreground">
                       {formatFecha(registro.Fecha)}
@@ -732,9 +867,14 @@ const dopeSeleccionado = dopes.find(
                     </p>
                   </div>
                   <div className="rounded-xl bg-muted/50 p-3">
-                    <p className="text-xs text-muted-foreground">DOPE usado</p>
+                    <p className="text-xs text-muted-foreground">Total DOPE usado</p>
                     <p className="mt-1 font-medium">
-                      {formatNumero(registro.CantDOPE)} g
+                      {formatNumero(
+                        (registro.dopesUsados ?? []).reduce(
+                          (total, item) => total + Number(item.CantDOPE || 0),
+                          0,
+                        ) || registro.CantDOPE,
+                      )} g
                     </p>
                   </div>
                 </div>
@@ -834,16 +974,33 @@ const dopeSeleccionado = dopes.find(
                   {formatFecha(detalle.Fecha)}
                 </dd>
               </div>
-              <div className="flex justify-between gap-4 border-b pb-3">
-                <dt className="text-muted-foreground">DOPE utilizado</dt>
-                <dd className="text-right font-medium">
-                  #{detalle.DOPE ?? "—"}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4 border-b pb-3">
-                <dt className="text-muted-foreground">Cantidad utilizada</dt>
-                <dd className="text-right font-medium">
-                  {formatNumero(detalle.CantDOPE)} g
+              <div className="border-b pb-3">
+                <dt className="mb-2 text-muted-foreground">DOPE utilizados</dt>
+                <dd className="space-y-2 font-medium">
+                  {(detalle.dopesUsados ?? []).length > 0 ? (
+                    (detalle.dopesUsados ?? []).map((item) => (
+                      <div
+                        key={item.dope_id}
+                        className="flex justify-between gap-4"
+                      >
+                        <span>DOPE #{item.dope_id}</span>
+                        <span>{formatNumero(item.CantDOPE)} g</span>
+                      </div>
+                    ))
+                  ) : (
+                    <span>—</span>
+                  )}
+                  <div className="flex justify-between gap-4 border-t pt-2">
+                    <span>Total utilizado</span>
+                    <span>
+                      {formatNumero(
+                        (detalle.dopesUsados ?? []).reduce(
+                          (total, item) => total + Number(item.CantDOPE || 0),
+                          0,
+                        ) || detalle.CantDOPE,
+                      )} g
+                    </span>
+                  </div>
                 </dd>
               </div>
               <div className="flex justify-between gap-4 border-b pb-3">
