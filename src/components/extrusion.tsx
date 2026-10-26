@@ -620,6 +620,9 @@ function quitarDopeUsado(indice: number) {
                               disabled={yaSeleccionado}
                             >
                               {`DOPE #${dope.id}`}
+                              {dope.FechaPreparacion
+      ? ` · ${new Date(`${dope.FechaPreparacion}T12:00:00`).toLocaleDateString("es-AR")}`
+      : ""}
                               {dope.Peso != null
                                 ? ` · ${formatNumero(dope.Peso)} g`
                                 : ""}

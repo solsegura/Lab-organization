@@ -51,7 +51,8 @@ type Dope = {
     fecha: string | null
     geometria: string | null
   } | null
-
+concentracionTeorica: number | null
+concentracionMedida: number | null
   pdf: string | null
 }
 
@@ -68,6 +69,15 @@ export function Preparacion({
   const [cargando, setCargando] = useState(true)
   const [errorCarga, setErrorCarga] = useState<string | null>(null)
   const [actualizandoId, setActualizandoId] = useState<number | null>(null)
+const [concentracionMedidaInput, setConcentracionMedidaInput] =
+  useState("")
+const [guardandoConcentracion, setGuardandoConcentracion] =
+  useState(false)
+const [errorConcentracion, setErrorConcentracion] =
+  useState<string | null>(null)
+const [mensajeConcentracion, setMensajeConcentracion] =
+  useState<string | null>(null)
+
 
   useEffect(() => {
     async function cargarDopes() {
@@ -83,8 +93,8 @@ export function Preparacion({
   supabase
     .from("DOPE")
     .select(
-      'id, "FechaPreparacion", "Peso", "Estado", "Recuperado", "RecuperadoDe"'
-    )
+  'id, "FechaPreparacion", "Peso", "Estado", "Recuperado", "RecuperadoDe", "ConcentracionTeorica", "ConcentracionMedida"'
+)
     .order("id", { ascending: false }),
 
   supabase
@@ -155,24 +165,33 @@ const registros: Dope[] = (datosDopes ?? []).map((registro) => {
       : Number(registro.RecuperadoDe)
 
   return {
-    id: Number(registro.id),
-    fecha: registro.FechaPreparacion,
-    peso: registro.Peso == null ? null : Number(registro.Peso),
-    estado,
-    ubicacion:
-      estado === "Extruido"
-        ? "-"
-        : idsEnHeladera.has(Number(registro.id))
-          ? "Dentro de heladera"
-          : "Fuera de heladera",
-    recuperado: registro.Recuperado === true || recuperadoDe !== null,
-    recuperadoDe,
-    extrusionOrigen:
-      recuperadoDe === null
-        ? null
-        : extrusionesPorId.get(recuperadoDe) ?? null,
+  id: Number(registro.id),
+  fecha: registro.FechaPreparacion,
+  peso: registro.Peso == null ? null : Number(registro.Peso),
+  estado,
+  ubicacion:
+    estado === "Extruido"
+      ? "-"
+      : idsEnHeladera.has(Number(registro.id))
+        ? "Dentro de heladera"
+        : "Fuera de heladera",
+  recuperado: registro.Recuperado === true || recuperadoDe !== null,
+  recuperadoDe,
+  extrusionOrigen:
+    recuperadoDe === null
+      ? null
+      : extrusionesPorId.get(recuperadoDe) ?? null,
+  concentracionTeorica:
+    registro.ConcentracionTeorica == null
+      ? null
+      : Number(registro.ConcentracionTeorica),
+  concentracionMedida:
+    registro.ConcentracionMedida == null
+      ? null
+      : Number(registro.ConcentracionMedida),
   pdf: pdfPorDopeId.get(Number(registro.id)) ?? null,
-      }
+}
+      
 })
 
 setDopes(registros)
@@ -221,7 +240,69 @@ setCargando(false)
 
   function abrirDetalles(dope: Dope) {
     setDopeSeleccionado(dope)
+    setConcentracionMedidaInput(
+  dope.concentracionMedida != null
+    ? String(dope.concentracionMedida)
+    : ""
+)
+setErrorConcentracion(null)
+setMensajeConcentracion(null)
   }
+
+  async function guardarConcentracionMedida() {
+  if (!dopeSeleccionado) return
+
+  const valor = concentracionMedidaInput.trim()
+
+  if (valor === "") {
+    setErrorConcentracion("Ingresá una concentración medida.")
+    return
+  }
+
+  // Acepta coma o punto como separador decimal.
+  const numero = Number(valor.replace(",", "."))
+
+  if (!Number.isFinite(numero) || numero < 0) {
+    setErrorConcentracion("Ingresá un valor numérico válido.")
+    return
+  }
+
+  setGuardandoConcentracion(true)
+  setErrorConcentracion(null)
+  setMensajeConcentracion(null)
+
+  try {
+    const { error } = await supabase
+      .from("DOPE")
+      .update({ ConcentracionMedida: numero })
+      .eq("id", dopeSeleccionado.id)
+
+    if (error) throw error
+
+    const dopeActualizado = {
+      ...dopeSeleccionado,
+      concentracionMedida: numero,
+    }
+
+    setDopes((actuales) =>
+      actuales.map((dope) =>
+        dope.id === dopeActualizado.id
+          ? { ...dope, concentracionMedida: numero }
+          : dope
+      )
+    )
+
+    setDopeSeleccionado(dopeActualizado)
+    setMensajeConcentracion("Concentración guardada correctamente.")
+  } catch (error) {
+    console.error("Error al guardar la concentración:", error)
+    setErrorConcentracion(
+      "No se pudo guardar la concentración. Revisá los permisos de Supabase."
+    )
+  } finally {
+    setGuardandoConcentracion(false)
+  }
+}
 const [subiendoPdf, setSubiendoPdf] = useState(false)
   
 async function abrirPdf(dope: Dope) {
@@ -470,151 +551,196 @@ return (
           }
         }}
       >
-        <DialogContent className="max-w-lg">
-          {dopeSeleccionado && (
-            <>
-              <DialogHeader>
-                <DialogTitle>
-                  DOPE #{dopeSeleccionado.id}
-                </DialogTitle>
+       
+<DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+  {dopeSeleccionado && (
+    <>
+      <DialogHeader>
+        <DialogTitle>
+          DOPE #{dopeSeleccionado.id}
+        </DialogTitle>
+        <DialogDescription>
+          Información del DOPE preparado el{" "}
+          {formatearFecha(dopeSeleccionado.fecha)}.
+        </DialogDescription>
+      </DialogHeader>
 
-                <DialogDescription>
-                  Información del DOPE preparado el{" "}
-                  {formatearFecha(
-                    dopeSeleccionado.fecha
-                  )}
-                  .
-                </DialogDescription>
-              </DialogHeader>
+      <div className="space-y-5">
+        <section className="rounded-xl border p-4">
+          <h3 className="mb-4 text-sm font-semibold">
+            Datos del DOPE
+          </h3>
 
-              <div className="space-y-6">
-                {/* Datos generales */}
-                <div>
-                  <h3 className="mb-3 text-sm font-semibold">
-                    Datos del DOPE
-                  </h3>
+          <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+            <Detalle
+              label="Fecha de preparación"
+              value={formatearFecha(dopeSeleccionado.fecha)}
+            />
+            <Detalle
+              label="Peso"
+              value={formatPeso(dopeSeleccionado.peso)}
+            />
+            <Detalle
+              label="Estado"
+              value={dopeSeleccionado.estado}
+            />
+            <Detalle
+              label="Ubicación"
+              value={dopeSeleccionado.ubicacion}
+            />
+            <Detalle
+              label="Concentración teórica"
+              value={
+                dopeSeleccionado.concentracionTeorica != null
+                  ? String(dopeSeleccionado.concentracionTeorica)
+                  : "Sin registrar"
+              }
+            />
+          </div>
 
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                    <Detalle
-                      label="Fecha de preparación"
-                      value={formatearFecha(
-                        dopeSeleccionado.fecha
-                      )}
-                    />
+          {dopeSeleccionado.recuperado && (
+            <div className="mt-4 border-t pt-4">
+              <h4 className="mb-3 text-sm font-medium">
+                Recuperación
+              </h4>
 
-                    <Detalle
-                      label="Peso"
-                      value={formatPeso(
-                        dopeSeleccionado.peso
-                      )}
-                    />
-
-                    <div>
-                      <p className="text-xs text-muted-foreground">
-                        Estado
-                      </p>
-
-                      <p className="mt-1 text-sm font-medium">
-                        {dopeSeleccionado.estado}
-                      </p>
-                    </div>
-
-                    {/* PDF de preparación */}
-<div className="space-y-3 border-t pt-4">
-  <h3 className="text-sm font-semibold">
-    PDF de preparación
-  </h3>
-
-  {dopeSeleccionado.pdf ? (
-    <Button
-      type="button"
-      variant="outline"
-      className="w-full justify-start"
-      onClick={() => void abrirPdf(dopeSeleccionado)}
-    >
-      <FileText className="mr-2 h-4 w-4" />
-      Ver PDF adjunto
-    </Button>
-  ) : (
-    <p className="text-sm text-muted-foreground">
-      Todavía no hay un PDF adjunto.
-    </p>
-  )}
-
-  <div className="space-y-2">
-    <Label htmlFor="pdf-detalles">
-      {dopeSeleccionado.pdf ? "Reemplazar PDF" : "Adjuntar PDF"}
-    </Label>
-
-    <Input
-      id="pdf-detalles"
-      type="file"
-      accept="application/pdf,.pdf"
-      disabled={subiendoPdf}
-      onChange={(event) => {
-        const archivo = event.target.files?.[0]
-
-        if (archivo && dopeSeleccionado) {
-          void guardarPdf(dopeSeleccionado, archivo)
-        }
-
-        event.target.value = ""
-      }}
-    />
-
-    {subiendoPdf && (
-      <p className="text-sm text-muted-foreground">
-        Subiendo PDF...
-      </p>
-    )}
-  </div>
-</div>
-                    <Detalle
-
-                    
-  label="Ubicación"
-  value={dopeSeleccionado.ubicacion}
-/>
-
-{dopeSeleccionado.recuperado && (
-  <>
-    <Detalle
-      label="DOPE recuperado"
-      value="Sí"
-    />
-
-    <div className="col-span-2">
-      <Detalle
-        label="Extrusión de origen"
-        value={
-          dopeSeleccionado.recuperadoDe === null
-            ? "Sin registrar"
-            : `Extrusión #${dopeSeleccionado.recuperadoDe}`
-        }
-      />
-
-      {dopeSeleccionado.extrusionOrigen && (
-        <p className="mt-1 text-sm text-muted-foreground">
-          {dopeSeleccionado.extrusionOrigen.fecha
-            ? `Fecha: ${formatearFecha(
-                dopeSeleccionado.extrusionOrigen.fecha
-              )}`
-            : "Fecha sin registrar"}
-          {" · "}
-          {dopeSeleccionado.extrusionOrigen.geometria ??
-            "Geometría sin registrar"}
-        </p>
-      )}
-    </div>
-  </>
-)}
-                  </div>
-                </div>
-
+              <div className="grid grid-cols-2 gap-4">
+                <Detalle label="DOPE recuperado" value="Sí" />
+                <Detalle
+                  label="Extrusión de origen"
+                  value={
+                    dopeSeleccionado.recuperadoDe === null
+                      ? "Sin registrar"
+                      : `Extrusión #${dopeSeleccionado.recuperadoDe}`
+                  }
+                />
               </div>
-            </>
+
+              {dopeSeleccionado.extrusionOrigen && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  {dopeSeleccionado.extrusionOrigen.fecha
+                    ? `Fecha: ${formatearFecha(
+                        dopeSeleccionado.extrusionOrigen.fecha
+                      )}`
+                    : "Fecha sin registrar"}
+                  {" · "}
+                  {dopeSeleccionado.extrusionOrigen.geometria ??
+                    "Geometría sin registrar"}
+                </p>
+              )}
+            </div>
           )}
-        </DialogContent>
+        </section>
+
+        <section className="rounded-xl border p-4">
+          <h3 className="text-sm font-semibold">
+            Concentración medida
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Podés cargar o corregir el valor medido.
+          </p>
+
+          <div className="mt-4 space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="concentracion-medida">
+                Valor medido
+              </Label>
+              <Input
+                id="concentracion-medida"
+                type="text"
+                inputMode="decimal"
+                placeholder="Ingresar concentración"
+                value={concentracionMedidaInput}
+                disabled={guardandoConcentracion}
+                onChange={(event) => {
+                  setConcentracionMedidaInput(event.target.value)
+                  setErrorConcentracion(null)
+                  setMensajeConcentracion(null)
+                }}
+              />
+            </div>
+
+            {errorConcentracion && (
+              <p role="alert" className="text-sm text-destructive">
+                {errorConcentracion}
+              </p>
+            )}
+
+            {mensajeConcentracion && (
+              <p className="text-sm text-muted-foreground">
+                {mensajeConcentracion}
+              </p>
+            )}
+
+            <Button
+              type="button"
+              className="w-full"
+              disabled={guardandoConcentracion}
+              onClick={() => void guardarConcentracionMedida()}
+            >
+              {guardandoConcentracion
+                ? "Guardando..."
+                : "Guardar concentración"}
+            </Button>
+          </div>
+        </section>
+
+        <section className="rounded-xl border p-4">
+          <h3 className="text-sm font-semibold">
+            PDF de preparación
+          </h3>
+
+          <div className="mt-3 space-y-3">
+            {dopeSeleccionado.pdf ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => void abrirPdf(dopeSeleccionado)}
+              >
+                <FileText className="mr-2 h-4 w-4" />
+                Ver PDF adjunto
+              </Button>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Todavía no hay un PDF adjunto.
+              </p>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="pdf-detalles">
+                {dopeSeleccionado.pdf
+                  ? "Reemplazar PDF"
+                  : "Adjuntar PDF"}
+              </Label>
+
+              <Input
+                id="pdf-detalles"
+                type="file"
+                accept="application/pdf,.pdf"
+                disabled={subiendoPdf}
+                onChange={(event) => {
+                  const archivo = event.target.files?.[0]
+                  if (archivo && dopeSeleccionado) {
+                    void guardarPdf(dopeSeleccionado, archivo)
+                  }
+                  event.target.value = ""
+                }}
+              />
+
+              {subiendoPdf && (
+                <p className="text-sm text-muted-foreground">
+                  Subiendo PDF...
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+    </>
+  )}
+</DialogContent>
+
       </Dialog>
     </>
   )

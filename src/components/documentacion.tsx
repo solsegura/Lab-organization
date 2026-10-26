@@ -132,34 +132,75 @@ export function Documentacion() {
     setMensaje("")
     try {
       if (tipo === "Registros DOPE" || tipo === "Registros Fibras") {
-        // Los registros se muestran directamente desde sus tablas de origen:
-        // el PDF se adjunta al evento y no se duplica en Documentacion.
-        const tabla = tipo === "Registros DOPE" ? "PreparacionDOPE" : "ExtrusionFibras"
-        const { data, error: consultaError } = await supabase.from(tabla).select("*").order("id", { ascending: false })
-        if (consultaError) throw consultaError
+  if (tipo === "Registros DOPE") {
+    const { data: preparaciones, error: prepError } = await supabase
+      .from("PreparacionDOPE")
+      .select("*")
+      .order("id", { ascending: false })
 
-        const filas = (data ?? []) as Record<string, unknown>[]
-        const eventosNormalizados = filas
-          .filter((fila) => tipo !== "Registros Fibras" || fila.FormacionFibras === true)
-          .map((fila) => {
-            const id = Number(fila.id)
-            const fecha = (fila.Fecha ?? fila.fecha ?? fila.FechaPreparacion ?? null) as string | null
-            const pdf = (fila.PDF ?? fila.pdf ?? null) as string | null
-            const dope = fila.DOPE == null ? null : Number(fila.DOPE)
-            const fibra = fila.Fibras == null ? null : Number(fila.Fibras)
-            return {
-              id,
-              fecha,
-              pdf,
-              dope,
-              fibra,
-              nombre: tipo === "Registros DOPE" ? `Preparación DOPE #${dope ?? id}` : `Extrusión #${id}`,
-              raw: fila,
-            }
-          })
-        setEventos(eventosNormalizados)
-        setDocumentos([])
-      } else {
+    if (prepError) throw prepError
+
+    const { data: dopes, error: dopeError } = await supabase
+      .from("DOPE")
+      .select('id, "FechaPreparacion"')
+
+    if (dopeError) throw dopeError
+
+    const fechasPorDope = new Map(
+      (dopes ?? []).map((dope) => [
+        Number(dope.id),
+        dope.FechaPreparacion,
+      ]),
+    )
+
+    const eventosNormalizados = (preparaciones ?? []).map(
+      (fila: Record<string, unknown>) => {
+        const id = Number(fila.id)
+        const dopeId =
+          fila.DOPE == null ? null : Number(fila.DOPE)
+
+        return {
+          id,
+          fecha: dopeId != null
+            ? fechasPorDope.get(dopeId) ?? null
+            : null,
+          pdf: (fila.PDF ?? fila.pdf ?? null) as string | null,
+          dope: dopeId,
+          fibra: null,
+          nombre: `Preparación DOPE #${dopeId ?? id}`,
+          raw: fila,
+        }
+      },
+    )
+
+    setEventos(eventosNormalizados)
+    setDocumentos([])
+  } else {
+    const { data, error: consultaError } = await supabase
+      .from("ExtrusionFibras")
+      .select("*")
+      .order("id", { ascending: false })
+
+    if (consultaError) throw consultaError
+
+    const filas = (data ?? []) as Record<string, unknown>[]
+
+    const eventosNormalizados = filas
+      .filter((fila) => fila.FormacionFibras === true)
+      .map((fila) => ({
+        id: Number(fila.id),
+        fecha: (fila.Fecha ?? fila.fecha ?? null) as string | null,
+        pdf: (fila.PDF ?? fila.pdf ?? null) as string | null,
+        dope: fila.DOPE == null ? null : Number(fila.DOPE),
+        fibra: fila.Fibras == null ? null : Number(fila.Fibras),
+        nombre: `Extrusión #${fila.id}`,
+        raw: fila,
+      }))
+
+    setEventos(eventosNormalizados)
+    setDocumentos([])
+  }
+} else {
         const { data, error: consultaError } = await supabase
           .from("Documentacion")
           .select('id, pdf, "Tipo", "Nombre", "DOPE", "Fibra", "Equipo"')
@@ -185,17 +226,32 @@ export function Documentacion() {
   }, [categoria, cargarContenido])
 
   async function abrirPdf(ruta: string) {
-    if (/^https?:\/\//i.test(ruta)) {
-      window.open(ruta, "_blank", "noopener,noreferrer")
-      return
-    }
-    const { data, error: urlError } = await supabase.storage.from(BUCKET).createSignedUrl(ruta, 60)
-    if (urlError || !data?.signedUrl) {
-      setError(urlError?.message ?? "No se pudo generar el enlace al PDF.")
-      return
-    }
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer")
+  if (/^https?:\/\//i.test(ruta)) {
+    window.open(ruta, "_blank", "noopener,noreferrer")
+    return
   }
+
+  const buckets = [
+    "documentacion-archivos",
+    "preparacion-pdf",
+    "extrusion-pdfs",
+  ]
+
+  for (const bucket of buckets) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(ruta, 60)
+
+    if (!error && data?.signedUrl) {
+      window.open(data.signedUrl, "_blank", "noopener,noreferrer")
+      return
+    }
+  }
+
+  setError(
+    "No se encontró el PDF en los buckets de documentación, preparación o extrusión. Verificá la ruta guardada en Supabase."
+  )
+}
 
   async function subirArchivo(archivoPdf: File, carpeta: string, id?: number) {
     if (!esPdf(archivoPdf)) throw new Error("Seleccioná un archivo PDF.")
@@ -260,7 +316,7 @@ export function Documentacion() {
     setMensaje("")
     let ruta: string | null = null
     try {
-      const tabla = categoria === "Registros DOPE" ? "Preparacion_DOPE" : "ExtrusionFibras"
+      const tabla = categoria === "Registros DOPE" ? "PreparacionDOPE" : "ExtrusionFibras"
       ruta = await subirArchivo(archivo, categoria === "Registros DOPE" ? "registros-dope" : "registros-fibras", evento.id)
       const { error: updateError } = await supabase.from(tabla).update({ PDF: ruta }).eq("id", evento.id)
       if (updateError) throw updateError

@@ -23,6 +23,7 @@ import { Heladera } from "@/components/heladera"
 import { Mantenimiento } from "@/components/mantenimiento"
 import { Historial } from "@/components/historial"
 import { Documentacion } from "@/components/documentacion"
+import Caracterizacion from "@/components/caracterizacion"
 
 type Section =
   | "preparacion"
@@ -32,6 +33,7 @@ type Section =
   | "mantenimiento"
   | "historial"
   | "documentacion"
+  | "caracterizacion"
 
 type PreparacionView =
   | "menu"
@@ -75,6 +77,11 @@ const menuItems = [
     label: "Documentación",
     icon: FileText,
   },
+  {
+    id: "caracterizacion" as Section,
+    label: "Caracterización",
+    icon: FlaskConical,
+  }
 ]
 
 function App() {
@@ -141,13 +148,13 @@ const [datosNuevoDope, setDatosNuevoDope] = useState<DatosNuevoDope | null>(null
 <header className="border-b">
   <div className="flex h-16 items-center justify-between px-6">
     <div>
-      <h1 className="text-xl font-semibold">
-        Lab Organization
-      </h1>
+      <img
+  src="/fiberly-logo.png"
+  alt="Fiberly"
+  className="h-8 w-auto object-contain"
+/>
 
-      <p className="text-sm text-muted-foreground">
-        Gestión del laboratorio
-      </p>
+    
     </div>
 
     <Button
@@ -246,7 +253,10 @@ const [datosNuevoDope, setDatosNuevoDope] = useState<DatosNuevoDope | null>(null
   <Historial />
 ) : activeSection === "documentacion" ? (
   <Documentacion />
+) : activeSection === "caracterizacion" ? (
+  <Caracterizacion />
 ) : (
+  
   <div>
     <h2 className="text-3xl font-semibold">
       {activeItem?.label}
