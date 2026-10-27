@@ -31,12 +31,16 @@ export default function Login() {
         onSubmit={handleLogin}
         className="w-full max-w-sm space-y-5 rounded-2xl border bg-white p-8 shadow-sm"
       >
-        <div className="text-center">
-          <h1 className="text-2xl font-semibold">Lab Organization</h1>
-          <p className="mt-2 text-sm text-neutral-500">
-            Ingresá a tu cuenta para continuar
-          </p>
-        </div>
+      <div className="text-center">
+  <img
+    src="/fiberly-logo.png"
+    alt="Fiberly"
+    className="mx-auto h-12 w-auto object-contain"
+  />
+  <p className="mt-2 text-sm text-neutral-500">
+    Ingresá a tu cuenta para continuar
+  </p>
+</div>
 
         <div className="space-y-2">
           <label htmlFor="email" className="text-sm font-medium">
@@ -79,8 +83,7 @@ export default function Login() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-md bg-neutral-900 px-4 py-2.5 font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
-        >
+className="w-full rounded-md bg-[#fc008e] px-4 py-2.5 font-medium text-white transition-colors hover:bg-[#df007e] disabled:cursor-not-allowed disabled:opacity-50"        >
           {loading ? "Ingresando..." : "Iniciar sesión"}
         </button>
       </form>

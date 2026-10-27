@@ -32,6 +32,9 @@ type Batch = {
 type Extrusion = {
   id: number
   Fecha: string
+  Fibras: number | null
+  Geometria: string | null
+  Peso: number | null
 }
 
 type Aporte = {
@@ -184,9 +187,13 @@ export function Caracterizacion() {
   const [formularioAbierto, setFormularioAbierto] = useState<FormularioAbierto>(null)
 
   const [nombre, setNombre] = useState("")
-  const [fecha, setFecha] = useState(hoy())
-  const [observaciones, setObservaciones] = useState("")
-  const [nuevosAportes, setNuevosAportes] = useState<Aporte[]>([
+const [fecha, setFecha] = useState(hoy())
+const [observaciones, setObservaciones] = useState("")
+
+const [origenBatch, setOrigenBatch] = useState<"extrusion" | "comercial">("extrusion")
+const [masaInicial, setMasaInicial] = useState("")
+
+const [nuevosAportes, setNuevosAportes] = useState<Aporte[]>([
     { Extrusion: "", MasaAportada: "" },
   ])
 
@@ -286,17 +293,51 @@ async function abrirArchivo(ruta: string) {
           .from("BatchFibras")
           .select("id, Nombre, Fecha, Observaciones")
           .order("Fecha", { ascending: false }),
-        supabase
-          .from("ExtrusionFibras")
-          .select("id, Fecha")
-          .eq("FormacionFibras", true)
-          .order("Fecha", { ascending: false }),
+     supabase
+  .from("ExtrusionFibras")
+  .select("id, Fecha, Fibras, Geometria")
+  .eq("FormacionFibras", true)
+  .order("Fecha", { ascending: false }),
       ])
       if (batchesError) throw batchesError
       if (extrusionesError) throw extrusionesError
-      setBatches((batchesData ?? []) as Batch[])
-      setExtrusiones((extrusionesData ?? []) as Extrusion[])
-    } catch (e) {
+     const extrusionesBase = extrusionesData ?? []
+
+const idsFibras = [
+  ...new Set(
+    extrusionesBase
+      .map((extrusion) => extrusion.Fibras)
+      .filter((id): id is number => id !== null),
+  ),
+]
+
+let mapaPesos = new Map<number, number | null>()
+
+if (idsFibras.length > 0) {
+  const { data: fibrasData, error: fibrasError } = await supabase
+    .from("Fibras")
+    .select("id, Peso")
+    .in("id", idsFibras)
+
+  if (fibrasError) throw fibrasError
+
+  mapaPesos = new Map(
+    (fibrasData ?? []).map((fibra) => [fibra.id, fibra.Peso]),
+  )
+}
+
+setBatches((batchesData ?? []) as Batch[])
+
+setExtrusiones(
+  extrusionesBase.map((extrusion) => ({
+    ...extrusion,
+    Peso:
+      extrusion.Fibras !== null
+        ? mapaPesos.get(extrusion.Fibras) ?? null
+        : null,
+  })) as Extrusion[],
+)
+ } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudieron cargar los datos.")
     } finally {
       setCargando(false)
@@ -396,9 +437,18 @@ async function abrirArchivo(ruta: string) {
   const muestraActual = muestras.find((muestra) => muestra.id === muestraSeleccionada)
 
   function nombreExtrusion(id: number) {
-    const extrusion = extrusiones.find((item) => item.id === id)
-    return extrusion ? `Extrusión #${id} · ${extrusion.Fecha}` : `Extrusión #${id}`
-  }
+  const extrusion = extrusiones.find((item) => item.id === id)
+
+  if (!extrusion) return `Fibras de extrusión #${id}`
+
+  const geometria = extrusion.Geometria ?? "Geometría no indicada"
+  const peso =
+    extrusion.Peso !== null
+      ? `${formatoMasa(Number(extrusion.Peso))} g`
+      : "Peso no disponible"
+
+  return `Fibras #${extrusion.Fibras ?? id} · ${geometria} · ${peso}`
+}
 
   function actualizarAporte(index: number, campo: keyof Aporte, valor: string) {
     setNuevosAportes((actuales) =>
@@ -419,49 +469,74 @@ async function abrirArchivo(ruta: string) {
       return
     }
     const aportesValidos = nuevosAportes.filter(
-      (aporte) => aporte.Extrusion !== "" && Number(aporte.MasaAportada) > 0,
-    )
-    if (aportesValidos.length === 0) {
-      setError("Agregá al menos una extrusión y su masa aportada.")
-      return
-    }
-    const extrusionesElegidas = aportesValidos.map((aporte) => aporte.Extrusion)
-    if (new Set(extrusionesElegidas).size !== extrusionesElegidas.length) {
-      setError("No podés agregar dos veces la misma extrusión al batch.")
-      return
-    }
+  (aporte) => aporte.Extrusion !== "" && Number(aporte.MasaAportada) > 0,
+)
+
+if (origenBatch === "comercial") {
+  if (
+    !masaInicial.trim() ||
+    !Number.isFinite(Number(masaInicial)) ||
+    Number(masaInicial) <= 0
+  ) {
+    setError("Ingresá una masa inicial mayor que cero para el lyocel comercial.")
+    return
+  }
+} else {
+  if (aportesValidos.length === 0) {
+    setError("Agregá al menos una extrusión y su masa aportada.")
+    return
+  }
+
+  const extrusionesElegidas = aportesValidos.map(
+    (aporte) => aporte.Extrusion,
+  )
+
+  if (new Set(extrusionesElegidas).size !== extrusionesElegidas.length) {
+    setError("No podés agregar dos veces la misma extrusión al batch.")
+    return
+  }
+}
 
     setGuardando(true)
     try {
       const { data: batchCreado, error: batchError } = await supabase
         .from("BatchFibras")
         .insert({
-          Nombre: nombre.trim(),
-          Fecha: fecha,
-          Observaciones: observaciones.trim() || null,
-        })
+  Nombre: nombre.trim(),
+  Fecha: fecha,
+  Observaciones: observaciones.trim() || null,
+  MasaInicial:
+    origenBatch === "comercial" ? Number(masaInicial) : null,
+})
         .select("id")
         .single()
       if (batchError) throw batchError
 
-      const filasAportes = aportesValidos.map((aporte) => ({
-        Batch: batchCreado.id,
-        Extrusion: Number(aporte.Extrusion),
-        MasaAportada: Number(aporte.MasaAportada),
-      }))
-      const { error: aportesError } = await supabase
-        .from("BatchFibras_Extrusion")
-        .insert(filasAportes)
-      if (aportesError) {
-        throw new Error(
-          `Se creó el batch #${batchCreado.id}, pero no se pudieron guardar sus aportes: ${aportesError.message}`,
-        )
-      }
+      if (origenBatch === "extrusion") {
+  const filasAportes = aportesValidos.map((aporte) => ({
+    Batch: batchCreado.id,
+    Extrusion: Number(aporte.Extrusion),
+    MasaAportada: Number(aporte.MasaAportada),
+  }))
+
+  const { error: aportesError } = await supabase
+    .from("BatchFibras_Extrusion")
+    .insert(filasAportes)
+
+  if (aportesError) {
+    throw new Error(
+      `Se creó el batch #${batchCreado.id}, pero no se pudieron guardar sus aportes: ${aportesError.message}`,
+    )
+  }
+}
 
       setNombre("")
-      setFecha(hoy())
-      setObservaciones("")
-      setNuevosAportes([{ Extrusion: "", MasaAportada: "" }])
+setFecha(hoy())
+setObservaciones("")
+setOrigenBatch("extrusion")
+setMasaInicial("")
+setNuevosAportes([{ Extrusion: "", MasaAportada: "" }])
+
       setFormularioAbierto(null)
       setBatchSeleccionado(batchCreado.id)
       setMuestraSeleccionada(null)
@@ -727,6 +802,22 @@ if (archivosError) throw archivosError
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
+              
+              <div className="space-y-2">
+  <Label htmlFor="batch-origen">Origen de las fibras</Label>
+  <select
+    id="batch-origen"
+    value={origenBatch}
+    onChange={(e) =>
+      setOrigenBatch(e.target.value as "extrusion" | "comercial")
+    }
+    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+  >
+    <option value="extrusion">Fibras de extrusión</option>
+    <option value="comercial">Lyocel comercial</option>
+  </select>
+</div>
+
               <div className="space-y-2">
                 <Label htmlFor="batch-nombre">Nombre del batch</Label>
                 <Input id="batch-nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Batch fibras 01" />
@@ -741,15 +832,19 @@ if (archivosError) throw archivosError
               <Textarea id="batch-observaciones" value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Notas sobre la preparación del batch..." />
             </div>
 
-            <div className="space-y-3">
+
+{origenBatch === "extrusion" ? (
+  <>
+    {
+              <div className="space-y-3">
               <div>
                 <h3 className="font-medium">Composición del batch</h3>
-                <p className="text-sm text-muted-foreground">Indicá cuántos gramos de cada extrusión se usaron.</p>
+                <p className="text-sm text-muted-foreground">Indicá cuántos gramos de cada fibra se usaron.</p>
               </div>
               {nuevosAportes.map((aporte, index) => (
                 <div key={index} className="grid gap-2 rounded-xl border p-3 sm:grid-cols-[1fr_130px_auto]">
                   <div className="space-y-1">
-                    <Label>Extrusión</Label>
+                    <Label>Fibra</Label>
                     <select
                       className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                       value={aporte.Extrusion}
@@ -774,19 +869,46 @@ if (archivosError) throw archivosError
               ))}
               <Button type="button" variant="outline" className="w-full" onClick={() => setNuevosAportes((actuales) => [...actuales, { Extrusion: "", MasaAportada: "" }])}>
                 <Plus className="mr-2 h-4 w-4" />
-                Agregar otra extrusión
+                Agregar otra fibra
               </Button>
               <div className="flex items-center justify-between rounded-xl bg-muted p-4">
                 <span className="text-sm font-medium">Masa total del batch</span>
                 <span className="text-lg font-semibold tabular-nums">{formatoMasa(masaNueva)} g</span>
               </div>
             </div>
+
+    /* Acá queda todo tu bloque actual de aportes de extrusiones */}
+  </>
+) : (
+  <div className="space-y-2">
+    <Label htmlFor="batch-masa-inicial">Masa inicial (g)</Label>
+    <Input
+      id="batch-masa-inicial"
+      type="number"
+      min="0.001"
+      step="0.001"
+      value={masaInicial}
+      onChange={(e) => setMasaInicial(e.target.value)}
+      placeholder="Ej. 500"
+    />
+    <p className="text-sm text-muted-foreground">
+      Ingresá la masa inicial del lyocel comercial en gramos.
+    </p>
+  </div>
+)}
+
+  
+
+
             <div className="flex flex-wrap justify-end gap-2">
               <Button type="button" variant="outline" onClick={cerrarFormulario} disabled={guardando}>Cancelar</Button>
               <Button onClick={() => void crearBatch()} disabled={guardando || cargando}>
                 {guardando ? "Guardando..." : "Crear batch"}
               </Button>
             </div>
+
+
+
           </CardContent>
         </Card>
       )}
