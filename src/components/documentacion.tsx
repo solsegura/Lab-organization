@@ -381,8 +381,19 @@ export function Documentacion() {
             {esRegistro ? "Consultá los eventos y adjuntá un PDF solamente cuando todavía no tengan uno." : "Consultá los documentos guardados o agregá uno nuevo."}
           </p>
         </div>
-        {!esRegistro && <Button onClick={() => { setMostrarFormulario((v) => !v); setError(""); setMensaje("") }}><Plus className="mr-2 h-4 w-4" />Agregar documento</Button>}
-      </div>
+{!esRegistro && (
+  <Button
+    onClick={() => {
+      setMostrarFormulario((v) => !v)
+      setError("")
+      setMensaje("")
+    }}
+    className="bg-[#fc008e] text-white hover:bg-[#df007e]"
+  >
+    <Plus className="mr-2 h-4 w-4" />
+    Agregar documento
+  </Button>
+)}      </div>
 
       {error && <div role="alert" className="rounded-xl border border-destructive/30 p-3 text-sm text-destructive">{error}</div>}
       {mensaje && <div role="status" className="rounded-xl border border-emerald-300 p-3 text-sm">{mensaje}</div>}
