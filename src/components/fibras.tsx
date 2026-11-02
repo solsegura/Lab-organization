@@ -1,6 +1,6 @@
 
 import { useEffect, useState } from "react"
-import { Scale, FlaskConical,Waves } from "lucide-react"
+import { Scale, FlaskConical, Waves, Trash2 } from "lucide-react"
 import { AccentLine } from "@/components/accent-line"
 import { Button } from "@/components/ui/button"
 import {
@@ -28,8 +28,11 @@ type Fibra = {
   geometria: string
   peso: number | null
 }
+type FibrasProps = {
+  modoAdmin: boolean
+}
 
-export function Fibras() {
+export function Fibras({ modoAdmin }: FibrasProps) {
   const [fibras, setFibras] = useState<Fibra[]>([])
   const [cargando, setCargando] = useState(true)
   const [guardando, setGuardando] = useState(false)
@@ -139,6 +142,60 @@ export function Fibras() {
     setPeso("")
     setGuardando(false)
   }
+
+  async function eliminarFibra(fibra: Fibra) {
+  if (guardando) return
+
+  // Consultar las extrusiones vinculadas a esta fibra
+  const { data: vinculadas, error: consultaError } = await supabase
+    .from("ExtrusionFibras")
+    .select("id")
+    .eq("Fibras", fibra.id)
+
+  if (consultaError) {
+    alert(`No se pudieron consultar las extrusiones: ${consultaError.message}`)
+    return
+  }
+
+  const idsExtrusiones = (vinculadas ?? []).map((item) => item.id)
+
+  const avisoExtrusiones = idsExtrusiones.length > 0
+    ? `\n\nLas siguientes extrusiones quedarán sin fibra asociada: ${
+        idsExtrusiones.map((id) => `#${id}`).join(", ")
+      }.`
+    : "\n\nEsta fibra no está asociada a ninguna extrusión."
+
+  const confirmar = window.confirm(
+    `¿Estás seguro de que querés eliminar la Fibra #${fibra.id}?${avisoExtrusiones}\n\nEsta acción no se puede deshacer.`,
+  )
+
+  if (!confirmar) return
+
+  setGuardando(true)
+
+  try {
+    const { error } = await supabase.rpc("eliminar_fibra_admin", {
+      p_fibra_id: fibra.id,
+    })
+
+    if (error) throw error
+
+    setFibras((actuales) =>
+      actuales.filter((item) => item.id !== fibra.id)
+    )
+
+    alert(`Fibra #${fibra.id} eliminada correctamente.`)
+  } catch (e) {
+    console.error("Error eliminando fibra:", e)
+    alert(
+      e instanceof Error
+        ? `No se pudo eliminar la fibra: ${e.message}`
+        : "No se pudo eliminar la fibra.",
+    )
+  } finally {
+    setGuardando(false)
+  }
+}
 
   const fibrasPendientes = fibras.filter(
     (fibra) => fibra.peso === null
@@ -250,6 +307,19 @@ export function Fibras() {
                           <Scale className="mr-2 h-4 w-4" />
                           Agregar peso
                         </Button>
+
+                        {modoAdmin && (
+  <Button
+    type="button"
+    variant="outline"
+    disabled={guardando}
+    onClick={() => void eliminarFibra(fibra)}
+    className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+  >
+    <Trash2 className="mr-2 h-4 w-4" />
+    Eliminar
+  </Button>
+)}
                       </>
                     ) : (
                       <Button

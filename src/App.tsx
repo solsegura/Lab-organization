@@ -281,8 +281,10 @@ const [datosNuevoDope, setDatosNuevoDope] = useState<DatosNuevoDope | null>(null
 ) : activeSection === "extrusion" ? (
   <ExtrusionForm
     onBack={() => setActiveSection("preparacion")}
+    modoAdmin={modoAdmin}
+
   />
-) : activeSection === "fibras" ? ( <Fibras /> 
+) : activeSection === "fibras" ? ( <Fibras modoAdmin={modoAdmin} /> 
   
 ) : activeSection === "heladera" ? (
   <Heladera />

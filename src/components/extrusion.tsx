@@ -7,6 +7,8 @@ import {
   Upload,
   Eye,
   RefreshCw,
+   Pencil,
+  Trash2,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { AccentLine } from "@/components/accent-line"
@@ -20,6 +22,7 @@ type Dope = {
   Estado?: string | null;
   Recuperado?: boolean | null;
   [key: string]: unknown;
+  RecuperadoDe?: number | null;
 };
 
 type ExtrusionRegistro = {
@@ -43,10 +46,12 @@ type ExtrusionRegistro = {
   } | null;
   Geometria: string
   dope?: Dope | null;
+  dopeRecuperado?: Dope | null;
 };
 
 type ExtrusionProps = {
   onBack: () => void;
+  modoAdmin: boolean;
 };
 
 const PDF_BUCKET = "extrusion-pdfs";
@@ -72,7 +77,7 @@ function formatNumero(value: number | null | undefined) {
   });
 }
 
-export function Extrusion({ onBack }: ExtrusionProps) {
+export function Extrusion({ onBack, modoAdmin }: ExtrusionProps) {
   const [dopes, setDopes] = useState<Dope[]>([]);
   const [extrusiones, setExtrusiones] = useState<ExtrusionRegistro[]>([]);
   const [subiendoPDFId, setSubiendoPDFId] = useState<number | null>(null);
@@ -81,6 +86,16 @@ export function Extrusion({ onBack }: ExtrusionProps) {
   const [error, setError] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [detalle, setDetalle] = useState<ExtrusionRegistro | null>(null);
+const [edicion, setEdicion] = useState<ExtrusionRegistro | null>(null);
+const [fechaEdicion, setFechaEdicion] = useState("");
+const [geometriaEdicion, setGeometriaEdicion] =
+  useState<Geometria>("circular");
+const [formacionFibrasEdicion, setFormacionFibrasEdicion] =
+  useState(true);
+const [dopeRecuperadoEdicion, setDopeRecuperadoEdicion] =
+  useState(false);
+const [cantidadRecuperadaEdicion, setCantidadRecuperadaEdicion] =
+  useState("");
 
   const [fecha, setFecha] = useState(
     new Date().toLocaleDateString("en-CA"),
@@ -148,6 +163,14 @@ export function Extrusion({ onBack }: ExtrusionProps) {
       }>;
 
       const mapaDopes = new Map(todosLosDopes.map((d) => [d.id, d]));
+      const recuperadosPorExtrusion = new Map<number, Dope>();
+
+for (const dope of todosLosDopes) {
+  if (dope.Recuperado && dope.RecuperadoDe != null) {
+    recuperadosPorExtrusion.set(Number(dope.RecuperadoDe), dope);
+  }
+}
+
       const mapaFibras = new Map(fibras.map((f) => [f.id, f]));
       const relacionesPorExtrusion = new Map<
         number,
@@ -183,6 +206,8 @@ export function Extrusion({ onBack }: ExtrusionProps) {
           fibra: registro.Fibras != null
             ? mapaFibras.get(registro.Fibras) ?? null
             : null,
+
+            dopeRecuperado: recuperadosPorExtrusion.get(registro.id) ?? null,
         }));
 
       setDopes(dopesDisponibles);
@@ -458,6 +483,157 @@ async function adjuntarPDF(registro: ExtrusionRegistro, archivo: File) {
     );
   } finally {
     setSubiendoPDFId(null);
+  }
+}
+
+function abrirEdicion(registro: ExtrusionRegistro) {
+  setEdicion(registro);
+  setFechaEdicion(
+    registro.Fecha ?? new Date().toLocaleDateString("en-CA"),
+  );
+  setGeometriaEdicion(registro.Geometria as Geometria);
+  setFormacionFibrasEdicion(Boolean(registro.FormacionFibras));
+setGeometriaEdicion(
+  (registro.Geometria as Geometria) || "circular",
+);
+
+
+  const recuperado = registro.dopeRecuperado;
+
+  setDopeRecuperadoEdicion(Boolean(recuperado));
+  setCantidadRecuperadaEdicion(
+    recuperado?.Peso != null ? String(recuperado.Peso) : "",
+  );
+
+  setError("");
+  setMensaje("");
+
+  setCantidadRecuperadaEdicion(
+  recuperado?.Peso != null
+    ? String(recuperado.Peso)
+    : recuperado?.MasaRestante != null
+      ? String(recuperado.MasaRestante)
+      : "",
+);
+}
+
+function cerrarEdicion() {
+  setEdicion(null);
+  setError("");
+}
+
+async function guardarEdicion(event: React.FormEvent<HTMLFormElement>) {
+  event.preventDefault();
+
+  if (!edicion) return;
+
+  setError("");
+  setMensaje("");
+
+  const cantidad = dopeRecuperadoEdicion
+    ? Number(cantidadRecuperadaEdicion)
+    : null;
+
+  if (!fechaEdicion) {
+    setError("Seleccioná la fecha de extrusión.");
+    return;
+  }
+
+  if (
+    dopeRecuperadoEdicion &&
+    (!Number.isFinite(cantidad) || cantidad! <= 0)
+  ) {
+    setError("Ingresá una cantidad recuperada válida, mayor que cero.");
+    return;
+  }
+
+  setGuardando(true);
+
+  try {
+    const { error: updateError } = await supabase.rpc(
+      "editar_extrusion_admin",
+      {
+        p_extrusion_id: edicion.id,
+        p_fecha: fechaEdicion,
+        p_geometria: geometriaEdicion,
+        p_formacion_fibras: formacionFibrasEdicion,
+        p_dope_recuperado: dopeRecuperadoEdicion,
+        p_cantidad_recuperada: cantidad,
+      },
+    );
+
+    if (updateError) throw updateError;
+
+    setEdicion(null);
+    setMensaje(`Extrusión #${edicion.id} actualizada correctamente.`);
+    await cargarDatos();
+  } catch (e) {
+    setError(
+      e instanceof Error
+        ? e.message
+        : "No se pudo actualizar la extrusión.",
+    );
+  } finally {
+    setGuardando(false);
+  }
+}
+
+async function eliminarExtrusion(registro: ExtrusionRegistro) {
+  const confirmar = window.confirm(
+    `¿Estás seguro de que querés eliminar la extrusión #${registro.id}?\n\nTambién se eliminarán su fibra asociada y el DOPE recuperado, si corresponde. Los DOPE originales utilizados no se modificarán.`,
+  );
+
+  if (!confirmar) return;
+
+  setError("");
+  setMensaje("");
+  setGuardando(true);
+
+  try {
+    const { data: rutaPDF, error: deleteError } = await supabase.rpc(
+      "eliminar_extrusion_admin",
+      {
+        p_extrusion_id: registro.id,
+      },
+    );
+
+    if (deleteError) throw deleteError;
+
+    // Eliminar el archivo del Storage después de borrar el registro.
+    if (
+      typeof rutaPDF === "string" &&
+      rutaPDF &&
+      !/^https?:\/\//i.test(rutaPDF)
+    ) {
+      const { error: storageError } = await supabase.storage
+        .from(PDF_BUCKET)
+        .remove([rutaPDF]);
+
+      if (storageError) {
+        setMensaje(
+          `La extrusión #${registro.id} fue eliminada, pero no se pudo borrar su PDF: ${storageError.message}`,
+        );
+      }
+    }
+
+    if (detalle?.id === registro.id) {
+      setDetalle(null);
+    }
+
+    setMensaje((actual) =>
+      actual ||
+      `Extrusión #${registro.id} eliminada correctamente.`,
+    );
+
+    await cargarDatos();
+  } catch (e) {
+    setError(
+      e instanceof Error
+        ? e.message
+        : "No se pudo eliminar la extrusión.",
+    );
+  } finally {
+    setGuardando(false);
   }
 }
 
@@ -891,7 +1067,29 @@ function quitarDopeUsado(indice: number) {
                     <Eye className="h-4 w-4" />
                     Ver detalles
                   </button>
+{modoAdmin && (
+  <>
+    <button
+      type="button"
+      onClick={() => abrirEdicion(registro)}
+      disabled={guardando}
+      className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition hover:bg-muted disabled:opacity-50"
+    >
+      <Pencil className="h-4 w-4" />
+      Editar
+    </button>
 
+    <button
+      type="button"
+      onClick={() => void eliminarExtrusion(registro)}
+      disabled={guardando}
+      className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-sm text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+    >
+      <Trash2 className="h-4 w-4" />
+      Eliminar
+    </button>
+  </>
+)}
                 
 {registro.PDF ? (
   <button
@@ -936,6 +1134,163 @@ function quitarDopeUsado(indice: number) {
           </div>
         )}
       </section>
+{edicion && (
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    onClick={cerrarEdicion}
+  >
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="editar-extrusion-titulo"
+      className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-background p-6 shadow-xl"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="mb-5">
+        <h2
+          id="editar-extrusion-titulo"
+          className="text-xl font-semibold"
+        >
+          Editar extrusión #{edicion.id}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Modificá los datos del registro.
+        </p>
+      </div>
+
+      <form onSubmit={guardarEdicion} className="space-y-5">
+        <label className="block space-y-2 text-sm font-medium">
+          Fecha de extrusión
+          <input
+            type="date"
+            value={fechaEdicion}
+            onChange={(e) => setFechaEdicion(e.target.value)}
+            required
+            className="w-full rounded-xl border bg-background px-3 py-2.5 font-normal"
+          />
+        </label>
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium">DOPE utilizado</p>
+          <div className="rounded-xl bg-muted/50 p-3 text-sm">
+            {(edicion.dopesUsados ?? []).length > 0 ? (
+              (edicion.dopesUsados ?? []).map((item) => (
+                <div
+                  key={item.dope_id}
+                  className="flex justify-between gap-3 py-1"
+                >
+                  <span>DOPE #{item.dope_id}</span>
+                  <span>{formatNumero(item.CantDOPE)} g</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-muted-foreground">Sin DOPE asociado.</p>
+            )}
+            <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+              Los DOPE utilizados y sus cantidades no se pueden modificar.
+            </p>
+          </div>
+        </div>
+
+        <label className="block space-y-2 text-sm font-medium">
+          Geometría
+          <select
+            value={geometriaEdicion}
+            onChange={(e) =>
+              setGeometriaEdicion(e.target.value as Geometria)
+            }
+            required
+            className="w-full rounded-xl border bg-background px-3 py-2.5 font-normal"
+          >
+            <option value="flat">Flat</option>
+            <option value="kidney-shape">Kidney Shape</option>
+            <option value="circular">Circular</option>
+          </select>
+        </label>
+
+        <div className="rounded-xl border p-4">
+          <p className="mb-3 text-sm font-medium">
+            ¿Se formaron fibras?
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setFormacionFibrasEdicion(true)}
+              className={`rounded-xl border px-4 py-2 text-sm transition ${
+                formacionFibrasEdicion
+                  ? "border-[#fc008e] bg-[#fc008e] text-white"
+                  : "hover:bg-muted"
+              }`}
+            >
+              Sí, se formaron
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormacionFibrasEdicion(false)}
+              className={`rounded-xl border px-4 py-2 text-sm transition ${
+                !formacionFibrasEdicion
+                  ? "border-[#fc008e] bg-[#fc008e] text-white"
+                  : "hover:bg-muted"
+              }`}
+            >
+              No se formaron
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-xl border p-4">
+          <label className="flex cursor-pointer items-center gap-3 text-sm font-medium">
+            <input
+              type="checkbox"
+              checked={dopeRecuperadoEdicion}
+              onChange={(e) =>
+                setDopeRecuperadoEdicion(e.target.checked)
+              }
+              className="h-4 w-4"
+            />
+            Se recuperó DOPE después de la extrusión
+          </label>
+
+          {dopeRecuperadoEdicion && (
+            <label className="mt-4 block space-y-2 text-sm font-medium">
+              Cantidad de DOPE recuperada (g)
+              <input
+                type="number"
+                min="0.001"
+                step="any"
+                value={cantidadRecuperadaEdicion}
+                onChange={(e) =>
+                  setCantidadRecuperadaEdicion(e.target.value)
+                }
+                required
+                placeholder="Peso recuperado"
+                className="w-full rounded-xl border bg-background px-3 py-2.5 font-normal"
+              />
+            </label>
+          )}
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={cerrarEdicion}
+            disabled={guardando}
+            className="rounded-xl border px-4 py-2.5 text-sm font-medium hover:bg-muted"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={guardando}
+            className="rounded-xl bg-[#fc008e] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#d9007a] disabled:opacity-50"
+          >
+            {guardando ? "Guardando..." : "Guardar cambios"}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
 
       {detalle && (
         <div
