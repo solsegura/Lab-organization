@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Waves,
   FileText,
+  ShieldCheck,
+
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -85,8 +87,10 @@ const menuItems = [
 ]
 
 function App() {
-  const [sesionVerificada, setSesionVerificada] = useState(false)
+const [sesionVerificada, setSesionVerificada] = useState(false)
 const [autenticado, setAutenticado] = useState(false)
+const [esAdmin, setEsAdmin] = useState(false)
+const [modoAdmin, setModoAdmin] = useState(false)
 
 useEffect(() => {
   supabase.auth.getSession().then(({ data, error }) => {
@@ -94,14 +98,27 @@ useEffect(() => {
       console.error("Error verificando sesión:", error)
     }
 
-    setAutenticado(!!data.session)
+    const session = data.session
+
+    setAutenticado(!!session)
+    setEsAdmin(session?.user.app_metadata?.role === "admin")
     setSesionVerificada(true)
   })
 
   const {
     data: { subscription },
-  } = supabase.auth.onAuthStateChange((_event, session) => {
+  } = supabase.auth.onAuthStateChange((event, session) => {
     setAutenticado(!!session)
+    setEsAdmin(session?.user.app_metadata?.role === "admin")
+
+    if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+      setModoAdmin(false)
+    }
+
+    if (!session) {
+      setModoAdmin(false)
+    }
+
     setSesionVerificada(true)
   })
 
@@ -157,18 +174,39 @@ const [datosNuevoDope, setDatosNuevoDope] = useState<DatosNuevoDope | null>(null
     
     </div>
 
-    <Button
-      variant="outline"
-      onClick={async () => {
-        const { error } = await supabase.auth.signOut()
+ <div className="flex items-center gap-3">
 
-        if (error) {
-          console.error("Error cerrando sesión:", error)
-        }
-      }}
+  {esAdmin && (
+    <Button
+      variant={modoAdmin ? "default" : "outline"}
+      onClick={() => setModoAdmin((v) => !v)}
+      className={
+        modoAdmin
+          ? "bg-[#fc008e] text-white hover:bg-[#df007e]"
+          : "border-[#fc008e] text-[#fc008e] hover:bg-pink-50"
+      }
     >
-      Cerrar sesión
+      <ShieldCheck className="mr-2 h-4 w-4" />
+      {modoAdmin ? "Modo admin activado" : "Activar modo admin"}
     </Button>
+  )}
+
+  <Button
+    variant="outline"
+    onClick={async () => {
+      const { error } = await supabase.auth.signOut()
+
+      if (error) {
+        console.error("Error cerrando sesión:", error)
+      }
+    }}
+  >
+    Cerrar sesión
+  </Button>
+
+</div>
+
+
   </div>
 </header>
 
@@ -217,6 +255,7 @@ const [datosNuevoDope, setDatosNuevoDope] = useState<DatosNuevoDope | null>(null
         onNewDope={() =>
           setPreparacionView("nuevo-dope")
         }
+        modoAdmin={modoAdmin}
       />
     )}
 

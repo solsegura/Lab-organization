@@ -8,6 +8,8 @@ import {
   Plus,
   FileText,
   Upload,
+  Pencil,
+  Trash2,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -58,10 +60,12 @@ concentracionMedida: number | null
 
 type PreparacionProps = {
   onNewDope: () => void
+  modoAdmin: boolean
 }
 
 export function Preparacion({
   onNewDope,
+  modoAdmin,
 }: PreparacionProps) {
   const [dopes, setDopes] = useState<Dope[]>([])
   const [dopeSeleccionado, setDopeSeleccionado] =
@@ -77,6 +81,13 @@ const [errorConcentracion, setErrorConcentracion] =
   useState<string | null>(null)
 const [mensajeConcentracion, setMensajeConcentracion] =
   useState<string | null>(null)
+const [dopeEnEdicion, setDopeEnEdicion] = useState<Dope | null>(null)
+const [fechaEdicion, setFechaEdicion] = useState("")
+const [pesoEdicion, setPesoEdicion] = useState("")
+const [concentracionEdicion, setConcentracionEdicion] = useState("")
+const [guardandoEdicion, setGuardandoEdicion] = useState(false)
+const [eliminandoId, setEliminandoId] = useState<number | null>(null)
+
 
 
   useEffect(() => {
@@ -248,6 +259,149 @@ setCargando(false)
 setErrorConcentracion(null)
 setMensajeConcentracion(null)
   }
+
+function abrirEdicion(dope: Dope) {
+  setDopeEnEdicion(dope)
+  setFechaEdicion(dope.fecha ?? "")
+  setPesoEdicion(dope.peso != null ? String(dope.peso) : "")
+  setConcentracionEdicion(
+    dope.concentracionTeorica != null
+      ? String(dope.concentracionTeorica)
+      : ""
+  )
+}
+
+async function guardarEdicion() {
+  if (!dopeEnEdicion || guardandoEdicion) return
+
+  if (!fechaEdicion) {
+    alert("Ingresá la fecha de preparación.")
+    return
+  }
+
+  const peso = pesoEdicion.trim() === ""
+    ? null
+    : Number(pesoEdicion.replace(",", "."))
+
+  const concentracion = concentracionEdicion.trim() === ""
+    ? null
+    : Number(concentracionEdicion.replace(",", "."))
+
+  if (peso !== null && (!Number.isFinite(peso) || peso < 0)) {
+    alert("Ingresá un peso válido.")
+    return
+  }
+
+  if (
+    concentracion !== null &&
+    (!Number.isFinite(concentracion) || concentracion < 0)
+  ) {
+    alert("Ingresá una concentración teórica válida.")
+    return
+  }
+
+  setGuardandoEdicion(true)
+
+  try {
+    const { error } = await supabase
+      .from("DOPE")
+      .update({
+        FechaPreparacion: fechaEdicion,
+        Peso: peso,
+        ConcentracionTeorica: concentracion,
+      })
+      .eq("id", dopeEnEdicion.id)
+
+    if (error) throw error
+
+    const actualizado: Dope = {
+      ...dopeEnEdicion,
+      fecha: fechaEdicion,
+      peso,
+      concentracionTeorica: concentracion,
+    }
+
+    setDopes((actuales) =>
+      actuales.map((dope) =>
+        dope.id === actualizado.id ? actualizado : dope
+      )
+    )
+
+    setDopeSeleccionado((actual) =>
+      actual?.id === actualizado.id ? actualizado : actual
+    )
+
+    setDopeEnEdicion(null)
+  } catch (error) {
+    console.error("Error al editar el DOPE:", error)
+    alert("No se pudieron guardar los cambios del DOPE.")
+  } finally {
+    setGuardandoEdicion(false)
+  }
+}
+
+async function eliminarDope(dope: Dope) {
+  if (eliminandoId !== null) return
+
+  const confirmado = window.confirm(
+    `¿Seguro que querés eliminar el DOPE #${dope.id}? Esta acción no se puede deshacer.`
+  )
+
+  if (!confirmado) return
+
+  setEliminandoId(dope.id)
+
+  try {
+    const { data: pdfEliminado, error } = await supabase.rpc(
+      "eliminar_dope_admin",
+      { p_dope_id: dope.id }
+    )
+
+    if (error) throw error
+
+    // El registro ya fue eliminado de la base de datos.
+    // Si tenía PDF, intentamos eliminar también el archivo.
+    if (pdfEliminado) {
+      const { error: errorPdf } = await supabase.storage
+        .from("preparacion-pdf")
+        .remove([pdfEliminado])
+
+      if (errorPdf) {
+        console.error("No se pudo eliminar el PDF del DOPE:", errorPdf)
+        alert(
+          "El DOPE se eliminó, pero no se pudo eliminar su PDF de Storage."
+        )
+      }
+    }
+
+    setDopes((actuales) =>
+      actuales.filter((item) => item.id !== dope.id)
+    )
+
+    setDopeSeleccionado((actual) =>
+      actual?.id === dope.id ? null : actual
+    )
+
+  } catch (error) {
+    console.error("Error al eliminar el DOPE:", error)
+
+    const mensaje = error instanceof Error
+      ? error.message
+      : "Error desconocido"
+
+    if (mensaje.includes("utilizado en una extrusión")) {
+      alert(
+        `No se puede eliminar el DOPE #${dope.id} porque ya fue utilizado en una extrusión.`
+      )
+    } else {
+      alert(`No se pudo eliminar el DOPE: ${mensaje}`)
+    }
+  } finally {
+    setEliminandoId(null)
+  }
+}
+
+
 
   async function guardarConcentracionMedida() {
   if (!dopeSeleccionado) return
@@ -522,17 +676,19 @@ return (
           ) : (
             <div className="space-y-3">
               {dopes.map((dope) => (
-                <DopeCard
-                  key={dope.id}
-                  dope={dope}
-                  onEstadoChange={cambiarEstado}
-                  estadoDeshabilitado={
-                    actualizandoId === dope.id || actualizandoId !== null
-                  }
-                  onViewDetails={() =>
-                    abrirDetalles(dope)
-                  }
-                />
+              <DopeCard
+  key={dope.id}
+  dope={dope}
+  onEstadoChange={cambiarEstado}
+  estadoDeshabilitado={
+    actualizandoId === dope.id || actualizandoId !== null
+  }
+  onViewDetails={() => abrirDetalles(dope)}
+  modoAdmin={modoAdmin}
+  onEdit={() => abrirEdicion(dope)}
+  onDelete={() => void eliminarDope(dope)}
+  eliminando={eliminandoId === dope.id}
+/>
               ))}
             </div>
           )}
@@ -542,6 +698,95 @@ return (
       {/* =====================================================
           DIÁLOGO DE DETALLES DEL DOPE
           ===================================================== */}
+<Dialog
+  open={dopeEnEdicion !== null}
+  onOpenChange={(open) => {
+    if (!open && !guardandoEdicion) {
+      setDopeEnEdicion(null)
+    }
+  }}
+>
+  <DialogContent className="max-w-md">
+    <DialogHeader>
+      <DialogTitle>
+        Editar DOPE #{dopeEnEdicion?.id}
+      </DialogTitle>
+      <DialogDescription>
+        Modificá los datos del registro seleccionado.
+      </DialogDescription>
+    </DialogHeader>
+
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="fecha-edicion-dope">
+          Fecha de preparación
+        </Label>
+        <Input
+          id="fecha-edicion-dope"
+          type="date"
+          value={fechaEdicion}
+          onChange={(event) => setFechaEdicion(event.target.value)}
+          disabled={guardandoEdicion}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="peso-edicion-dope">
+          Peso (g)
+        </Label>
+        <Input
+          id="peso-edicion-dope"
+          type="number"
+          min="0"
+          step="any"
+          value={pesoEdicion}
+          onChange={(event) => setPesoEdicion(event.target.value)}
+          disabled={guardandoEdicion}
+          placeholder="Peso en gramos"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="concentracion-edicion-dope">
+          Concentración teórica
+        </Label>
+        <Input
+          id="concentracion-edicion-dope"
+          type="number"
+          min="0"
+          step="any"
+          value={concentracionEdicion}
+          onChange={(event) =>
+            setConcentracionEdicion(event.target.value)
+          }
+          disabled={guardandoEdicion}
+          placeholder="Concentración"
+        />
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setDopeEnEdicion(null)}
+          disabled={guardandoEdicion}
+        >
+          Cancelar
+        </Button>
+
+        <Button
+          type="button"
+          onClick={() => void guardarEdicion()}
+          disabled={guardandoEdicion}
+          className="bg-[#fc008e] text-white hover:bg-[#d9007a]"
+        >
+          {guardandoEdicion ? "Guardando..." : "Guardar cambios"}
+        </Button>
+      </div>
+    </div>
+  </DialogContent>
+</Dialog>
+
 
       <Dialog
         open={dopeSeleccionado !== null}
@@ -755,6 +1000,10 @@ function DopeCard({
   onEstadoChange,
   estadoDeshabilitado,
   onViewDetails,
+  modoAdmin,
+  onEdit,
+  onDelete,
+  eliminando,
 }: {
   dope: Dope
   onEstadoChange: (
@@ -763,6 +1012,11 @@ function DopeCard({
   ) => void
   estadoDeshabilitado: boolean
   onViewDetails: () => void
+  modoAdmin: boolean
+  onEdit: () => void
+  onDelete: () => void
+  eliminando: boolean
+
 }) {
   return (
     <Card>
@@ -830,13 +1084,38 @@ function DopeCard({
         </div>
 
         {/* Detalles */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onViewDetails}
-        >
-          Ver detalles
-        </Button>
+      <div className="flex flex-wrap gap-2">
+  <Button
+    variant="outline"
+    size="sm"
+    onClick={onViewDetails}
+  >
+    Ver detalles
+  </Button>
+
+  {modoAdmin && (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onEdit}
+      >
+        <Pencil className="mr-2 h-4 w-4" />
+        Editar
+      </Button>
+
+      <Button
+        variant="destructive"
+        size="sm"
+        disabled={eliminando}
+        onClick={onDelete}
+      >
+        <Trash2 className="mr-2 h-4 w-4" />
+        {eliminando ? "Eliminando..." : "Eliminar"}
+      </Button>
+    </>
+  )}
+</div>
       </CardContent>
     </Card>
   )
