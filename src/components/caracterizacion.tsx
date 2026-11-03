@@ -774,7 +774,7 @@ if (archivosError) throw archivosError
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Button onClick={() => abrirFormulario("batch")}>
+          <Button onClick={() => abrirFormulario("batch")} className="bg-[#fc008e] text-white hover:bg-[#d9007a]">
             <Plus className="mr-2 h-4 w-4" />
             Nuevo batch
           </Button>

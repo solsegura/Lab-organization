@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ArrowLeft, CalendarDays, ClipboardList, FileText, Image as ImageIcon, Plus, Wrench } from "lucide-react"
+import { ArrowLeft, CalendarDays, ClipboardList, FileText, Image as ImageIcon, Plus, Wrench , Pencil, Trash2} from "lucide-react"
 
 import { supabase } from "@/lib/supabase"
 import { AccentLine } from "@/components/accent-line"
@@ -10,14 +10,24 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 
-type Equipo = { id: number; nombre: string; manual: string | null; foto: string | null }
+type Equipo = {
+  id: number
+  nombre: string
+  manual: string | null
+  foto: string | null
+  manualPath: string | null
+  fotoPath: string | null
+}
+
 type MantenimientoRegistro = { id: number; fecha: string; descripcion: string; pdfUrl: string | null }
 
 const BUCKET_PDF = "mantenimiento-pdf"
 const BUCKET_EQUIPOS = "equipos-archivos"
+type MantenimientoProps = {
+  modoAdmin: boolean
+}
 
-export function Mantenimiento() {
-  const [equipos, setEquipos] = useState<Equipo[]>([])
+export function Mantenimiento({ modoAdmin }: MantenimientoProps) {  const [equipos, setEquipos] = useState<Equipo[]>([])
   const [equipoSeleccionado, setEquipoSeleccionado] = useState<Equipo | null>(null)
   const [mantenimientos, setMantenimientos] = useState<MantenimientoRegistro[]>([])
   const [dialogEquipo, setDialogEquipo] = useState(false)
@@ -32,6 +42,15 @@ export function Mantenimiento() {
   const [cargandoMantenimientos, setCargandoMantenimientos] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+const [equipoEditando, setEquipoEditando] = useState<Equipo | null>(null)
+const [mantenimientoEditando, setMantenimientoEditando] =
+  useState<MantenimientoRegistro | null>(null)
+const [fotoActual, setFotoActual] = useState<string | null>(null)
+const [manualActual, setManualActual] = useState<string | null>(null)
+const [quitarFoto, setQuitarFoto] = useState(false)
+const [quitarManual, setQuitarManual] = useState(false)
+
+
 
   useEffect(() => { void cargarEquipos() }, [])
 
@@ -47,12 +66,14 @@ export function Mantenimiento() {
       setCargandoEquipos(false)
       return
     }
-    const equiposConArchivos = await Promise.all((data ?? []).map(async (r) => ({
-      id: Number(r.id),
-      nombre: r.Nombre,
-      manual: await obtenerUrlArchivoEquipo(r.Manual),
-      foto: await obtenerUrlArchivoEquipo(r.Foto),
-    })))
+   const equiposConArchivos = await Promise.all((data ?? []).map(async (r) => ({
+  id: Number(r.id),
+  nombre: r.Nombre,
+  manualPath: r.Manual,
+  fotoPath: r.Foto,
+  manual: await obtenerUrlArchivoEquipo(r.Manual),
+  foto: await obtenerUrlArchivoEquipo(r.Foto),
+})))
     setEquipos(equiposConArchivos)
     setCargandoEquipos(false)
   }
@@ -98,65 +119,204 @@ export function Mantenimiento() {
     setCargandoMantenimientos(false)
   }
 
-  async function guardarEquipo() {
-    if (!nombreEquipo.trim()) return
-    setGuardando(true)
-    setError(null)
-    const archivosSubidos: string[] = []
 
-    try {
-      let rutaFoto: string | null = null
-      let rutaManual: string | null = null
+async function guardarEquipo() {
+  if (!nombreEquipo.trim()) return
 
-      if (fotoArchivo) {
-        validarArchivo(fotoArchivo, "imagen")
-        rutaFoto = `equipos/${Date.now()}-${nombreSeguro(fotoArchivo.name)}`
-        const { error: errorFoto } = await supabase.storage.from(BUCKET_EQUIPOS).upload(
-          rutaFoto, fotoArchivo, { contentType: fotoArchivo.type, upsert: false },
-        )
-        if (errorFoto) throw new Error(`No se pudo subir la foto: ${errorFoto.message}`)
-        archivosSubidos.push(rutaFoto)
+  setGuardando(true)
+  setError(null)
+  const archivosSubidos: string[] = []
+
+  try {
+    let rutaFoto: string | null = equipoEditando?.fotoPath ?? null
+    let rutaManual: string | null = equipoEditando?.manualPath ?? null
+
+    if (fotoArchivo) {
+      validarArchivo(fotoArchivo, "imagen")
+      rutaFoto = `equipos/${Date.now()}-${nombreSeguro(fotoArchivo.name)}`
+
+      const { error: errorFoto } = await supabase.storage
+        .from(BUCKET_EQUIPOS)
+        .upload(rutaFoto, fotoArchivo, {
+          contentType: fotoArchivo.type,
+          upsert: false,
+        })
+
+      if (errorFoto) throw new Error(`No se pudo subir la foto: ${errorFoto.message}`)
+      archivosSubidos.push(rutaFoto)
+    }
+
+    if (manualArchivo) {
+      validarArchivo(manualArchivo, "pdf")
+      rutaManual = `manuales/${Date.now()}-${nombreSeguro(manualArchivo.name)}`
+
+      const { error: errorManual } = await supabase.storage
+        .from(BUCKET_EQUIPOS)
+        .upload(rutaManual, manualArchivo, {
+          contentType: "application/pdf",
+          upsert: false,
+        })
+
+      if (errorManual) throw new Error(`No se pudo subir el manual: ${errorManual.message}`)
+      archivosSubidos.push(rutaManual)
+    }
+
+    if (quitarFoto) rutaFoto = null
+    if (quitarManual) rutaManual = null
+
+    if (equipoEditando) {
+      const { data: archivosAnteriores, error: err } = await supabase.rpc(
+        "editar_equipo_admin",
+        {
+          p_equipo_id: equipoEditando.id,
+          p_nombre: nombreEquipo.trim(),
+          p_manual: rutaManual,
+          p_foto: rutaFoto,
+        }
+      )
+
+      if (err) throw new Error(err.message)
+
+      const equipoActualizado: Equipo = {
+        ...equipoEditando,
+        nombre: nombreEquipo.trim(),
+        manualPath: rutaManual,
+        fotoPath: rutaFoto,
+        manual: await obtenerUrlArchivoEquipo(rutaManual),
+        foto: await obtenerUrlArchivoEquipo(rutaFoto),
       }
 
-      if (manualArchivo) {
-        validarArchivo(manualArchivo, "pdf")
-        rutaManual = `manuales/${Date.now()}-${nombreSeguro(manualArchivo.name)}`
-        const { error: errorManual } = await supabase.storage.from(BUCKET_EQUIPOS).upload(
-          rutaManual, manualArchivo, { contentType: "application/pdf", upsert: false },
-        )
-        if (errorManual) throw new Error(`No se pudo subir el manual: ${errorManual.message}`)
-        archivosSubidos.push(rutaManual)
-      }
-const { data: sesionData, error: sesionError } =
-  await supabase.auth.getSession()
+      setEquipos((prev) =>
+        prev.map((e) => e.id === equipoActualizado.id ? equipoActualizado : e)
+          .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
+      )
 
-console.log("Sesión actual:", sesionData.session)
-console.log("Error de sesión:", sesionError)
+      setEquipoSeleccionado((prev) =>
+        prev?.id === equipoActualizado.id ? equipoActualizado : prev
+      )
+
+      const rutasAnteriores = (archivosAnteriores ?? []).filter(
+        (ruta: string | null) =>
+          ruta && ruta !== rutaFoto && ruta !== rutaManual &&
+          !ruta.startsWith("http://") && !ruta.startsWith("https://")
+      )
+
+      if (rutasAnteriores.length) {
+        const { error: errorStorage } = await supabase.storage
+          .from(BUCKET_EQUIPOS)
+          .remove(rutasAnteriores)
+
+        if (errorStorage) {
+          console.error("No se pudieron eliminar los archivos anteriores:", errorStorage)
+        }
+      }
+    } else {
       const { data, error: err } = await supabase
         .from("Equipo")
-        .insert({ Nombre: nombreEquipo.trim(), Foto: rutaFoto, Manual: rutaManual })
+        .insert({
+          Nombre: nombreEquipo.trim(),
+          Foto: rutaFoto,
+          Manual: rutaManual,
+        })
         .select('id, "Nombre", "Manual", "Foto"')
         .single()
+
       if (err) throw new Error(`No se pudo guardar el equipo: ${err.message}`)
 
       const nuevoEquipo: Equipo = {
         id: Number(data.id),
         nombre: data.Nombre,
+        manualPath: data.Manual,
+        fotoPath: data.Foto,
         manual: await obtenerUrlArchivoEquipo(data.Manual),
         foto: await obtenerUrlArchivoEquipo(data.Foto),
       }
-      setEquipos((prev) => [...prev, nuevoEquipo].sort((a, b) => a.nombre.localeCompare(b.nombre, "es")))
-      setDialogEquipo(false)
-      setNombreEquipo("")
-      setFotoArchivo(null)
-      setManualArchivo(null)
-    } catch (e) {
-      if (archivosSubidos.length) await supabase.storage.from(BUCKET_EQUIPOS).remove(archivosSubidos)
-      setError(e instanceof Error ? e.message : "Ocurrió un error inesperado.")
-    } finally {
-      setGuardando(false)
+
+      setEquipos((prev) =>
+        [...prev, nuevoEquipo].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
+      )
     }
+
+    setDialogEquipo(false)
+    setEquipoEditando(null)
+    setNombreEquipo("")
+    setFotoArchivo(null)
+    setManualArchivo(null)
+    setQuitarFoto(false)
+    setQuitarManual(false)
+  } catch (e) {
+    if (archivosSubidos.length) {
+      await supabase.storage.from(BUCKET_EQUIPOS).remove(archivosSubidos)
+    }
+    setError(e instanceof Error ? e.message : "Ocurrió un error inesperado.")
+  } finally {
+    setGuardando(false)
   }
+}
+
+
+
+function abrirEdicionEquipo(equipo: Equipo) {
+  setEquipoEditando(equipo)
+  setNombreEquipo(equipo.nombre)
+  setFotoArchivo(null)
+  setManualArchivo(null)
+  setQuitarFoto(false)
+  setQuitarManual(false)
+  setError(null)
+  setDialogEquipo(true)
+}
+
+async function eliminarEquipo(equipo: Equipo) {
+  if (guardando) return
+
+  const confirmar = window.confirm(
+    `¿Estás seguro de que querés eliminar el equipo "${equipo.nombre}"?\n\nEsta acción no se puede deshacer.`
+  )
+
+  if (!confirmar) return
+
+  setGuardando(true)
+  setError(null)
+
+  try {
+    const { data: archivosAnteriores, error: err } = await supabase.rpc(
+      "eliminar_equipo_admin",
+      { p_equipo_id: equipo.id }
+    )
+
+    if (err) throw err
+
+    setEquipos((prev) => prev.filter((e) => e.id !== equipo.id))
+
+    const rutas = (archivosAnteriores ?? []).filter(
+      (ruta: string | null) =>
+        ruta &&
+        !ruta.startsWith("http://") &&
+        !ruta.startsWith("https://")
+    )
+
+    if (rutas.length > 0) {
+      const { error: errorStorage } = await supabase.storage
+        .from(BUCKET_EQUIPOS)
+        .remove(rutas)
+
+      if (errorStorage) {
+        console.error("No se pudieron eliminar los archivos:", errorStorage)
+      }
+    }
+  } catch (e) {
+    setError(
+      e instanceof Error
+        ? e.message
+        : "No se pudo eliminar el equipo."
+    )
+  } finally {
+    setGuardando(false)
+  }
+}
+
+
 
   function abrirDialogoMantenimiento() {
     setFecha(obtenerFechaActual())
@@ -277,16 +437,71 @@ console.log("Error de sesión:", sesionError)
               </CardContent></Card>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {equipos.map((equipo) => (
-                  <button key={equipo.id} type="button" onClick={() => void seleccionarEquipo(equipo)} className="rounded-xl text-left outline-none transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring">
-                    <Card className="h-full transition-colors hover:border-primary/50">
-                      {equipo.foto ? <div className="flex h-44 items-center justify-center overflow-hidden rounded-t-xl border-b bg-muted/30 p-3"><img src={equipo.foto} alt={`Foto de ${equipo.nombre}`} className="h-full w-full object-contain" /></div> :
-                        <div className="flex h-44 items-center justify-center rounded-t-xl border-b bg-muted/30"><ImageIcon className="h-12 w-12 text-muted-foreground/60" /></div>}
-                      <CardHeader><CardTitle>{equipo.nombre}</CardTitle><CardDescription>{equipo.manual ? "Manual disponible" : "Sin manual adjunto"}</CardDescription></CardHeader>
-                      <CardContent><span className="text-sm font-medium text-primary">Ver equipo y mantenimientos →</span></CardContent>
-                    </Card>
-                  </button>
-                ))}
+               
+{equipos.map((equipo) => (
+  <Card key={equipo.id} className="h-full">
+    <button
+      type="button"
+      onClick={() => void seleccionarEquipo(equipo)}
+      className="w-full rounded-t-xl text-left outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {equipo.foto ? (
+        <div className="flex h-44 items-center justify-center overflow-hidden rounded-t-xl border-b bg-muted/30 p-3">
+          <img
+            src={equipo.foto}
+            alt={`Foto de ${equipo.nombre}`}
+            className="h-full w-full object-contain"
+          />
+        </div>
+      ) : (
+        <div className="flex h-44 items-center justify-center rounded-t-xl border-b bg-muted/30">
+          <ImageIcon className="h-12 w-12 text-muted-foreground/60" />
+        </div>
+      )}
+
+      <CardHeader>
+        <CardTitle>{equipo.nombre}</CardTitle>
+        <CardDescription>
+          {equipo.manual ? "Manual disponible" : "Sin manual adjunto"}
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        <span className="text-sm font-medium text-primary">
+          Ver equipo y mantenimientos →
+        </span>
+      </CardContent>
+    </button>
+
+    {modoAdmin && (
+      <CardContent className="flex gap-2 pt-0">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          onClick={() => abrirEdicionEquipo(equipo)}
+        >
+          <Pencil className="mr-2 h-4 w-4" />
+          Editar
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+          disabled={guardando}
+          onClick={() => void eliminarEquipo(equipo)}
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          Eliminar
+        </Button>
+      </CardContent>
+    )}
+  </Card>
+))}
+
               </div>
             )}
         </div>
@@ -294,16 +509,94 @@ console.log("Error de sesión:", sesionError)
 
       <Dialog open={dialogEquipo} onOpenChange={(open) => { if (!guardando) setDialogEquipo(open) }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Agregar equipo</DialogTitle><DialogDescription>Ingresá el nombre y seleccioná los archivos que quieras adjuntar.</DialogDescription></DialogHeader>
+<DialogHeader>
+  <DialogTitle>{equipoEditando ? "Editar equipo" : "Agregar equipo"}</DialogTitle>
+  <DialogDescription>
+    {equipoEditando
+      ? "Modificá los datos y archivos del equipo."
+      : "Ingresá el nombre y seleccioná los archivos que quieras adjuntar."}
+  </DialogDescription>
+</DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2"><Label htmlFor="nombre-equipo">Nombre del equipo</Label><Input id="nombre-equipo" placeholder="Ej. Extrusora" value={nombreEquipo} onChange={(e) => setNombreEquipo(e.target.value)} disabled={guardando} /></div>
-            <div className="space-y-2"><Label htmlFor="foto-equipo">Foto del equipo (opcional)</Label><Input id="foto-equipo" type="file" accept="image/*" disabled={guardando} onChange={(e) => { setFotoArchivo(e.target.files?.[0] ?? null); setError(null) }} />{fotoArchivo && <p className="text-xs text-muted-foreground">Seleccionado: {fotoArchivo.name}</p>}</div>
-            <div className="space-y-2"><Label htmlFor="manual-equipo">Manual del equipo en PDF (opcional)</Label><Input id="manual-equipo" type="file" accept="application/pdf,.pdf" disabled={guardando} onChange={(e) => { const archivo = e.target.files?.[0] ?? null; if (archivo && archivo.type !== "application/pdf" && !archivo.name.toLowerCase().endsWith(".pdf")) { setError("El manual debe ser un archivo PDF."); setManualArchivo(null); e.target.value = ""; return }; setManualArchivo(archivo); setError(null) }} />{manualArchivo && <p className="text-xs text-muted-foreground">Seleccionado: {manualArchivo.name}</p>}</div>
+<div className="space-y-2">
+  <Label htmlFor="foto-equipo">Foto del equipo</Label>
+
+  {equipoEditando?.foto && !quitarFoto && !fotoArchivo && (
+    <div className="space-y-2">
+      <img
+        src={equipoEditando.foto}
+        alt="Foto actual"
+        className="h-32 rounded-lg border object-contain"
+      />
+      <Button type="button" variant="outline" size="sm"
+        onClick={() => setQuitarFoto(true)}>
+        Quitar foto actual
+      </Button>
+    </div>
+  )}
+
+  <Input id="foto-equipo" type="file" accept="image/*" disabled={guardando}
+    onChange={(e) => {
+      setFotoArchivo(e.target.files?.[0] ?? null)
+      setQuitarFoto(false)
+      setError(null)
+    }} />
+</div>
+
+<div className="space-y-2">
+  <Label htmlFor="manual-equipo">Manual del equipo en PDF</Label>
+
+  {equipoEditando?.manual && !quitarManual && !manualArchivo && (
+    <div className="space-y-2">
+      <a href={equipoEditando.manual} target="_blank" rel="noopener noreferrer"
+        className="text-sm text-primary underline">
+        Abrir manual actual
+      </a>
+      <Button type="button" variant="outline" size="sm"
+        onClick={() => setQuitarManual(true)}>
+        Quitar manual actual
+      </Button>
+    </div>
+  )}
+
+  <Input id="manual-equipo" type="file" accept="application/pdf,.pdf"
+    disabled={guardando}
+    onChange={(e) => {
+      setManualArchivo(e.target.files?.[0] ?? null)
+      setQuitarManual(false)
+      setError(null)
+    }} />
+</div>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogEquipo(false)} disabled={guardando}>Cancelar</Button>
-            <Button onClick={() => void guardarEquipo()} disabled={!nombreEquipo.trim() || guardando} className="bg-[#fc008e] text-white hover:bg-[#d9007a]">{guardando ? "Guardando..." : "Guardar equipo"}</Button>
+<Button
+  variant="outline"
+  onClick={() => {
+    setDialogEquipo(false)
+    setEquipoEditando(null)
+    setNombreEquipo("")
+    setFotoArchivo(null)
+    setManualArchivo(null)
+    setQuitarFoto(false)
+    setQuitarManual(false)
+  }}
+  disabled={guardando}
+>
+  Cancelar
+</Button>
+<Button
+  onClick={() => void guardarEquipo()}
+  disabled={!nombreEquipo.trim() || guardando}
+  className="bg-[#fc008e] text-white hover:bg-[#d9007a]"
+>
+  {guardando
+    ? "Guardando..."
+    : equipoEditando
+      ? "Guardar cambios"
+      : "Guardar equipo"}
+</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

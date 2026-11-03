@@ -11,6 +11,7 @@ import {
   Wrench,
 } from "lucide-react"
 
+import { AccentLine } from "@/components/accent-line"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import {
@@ -347,6 +348,9 @@ export function Documentacion() {
             <BookOpen className="h-7 w-7" />
             <h1 className="text-3xl font-semibold tracking-tight">Documentación</h1>
           </div>
+          <div className="ml-10">
+  <AccentLine />
+</div>
           <p className="mt-2 text-sm text-muted-foreground">Protocolos, informes y registros del laboratorio.</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

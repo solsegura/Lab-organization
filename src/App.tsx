@@ -289,7 +289,7 @@ const [datosNuevoDope, setDatosNuevoDope] = useState<DatosNuevoDope | null>(null
 ) : activeSection === "heladera" ? (
   <Heladera />
  ) : activeSection === "mantenimiento" ? (
-  <Mantenimiento />)
+  <Mantenimiento modoAdmin={modoAdmin} />)
   : activeSection === "historial" ? (
   <Historial />
 ) : activeSection === "documentacion" ? (
